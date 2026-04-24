@@ -1,0 +1,32 @@
+# Workflow to transfer labels from template to newly created repository.
+# Adjust /.github/labels.yaml to include new labels.
+name: Sync labels
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/labels.yaml"
+      - ".github/workflows/labels.yaml"
+  pull_request:
+    paths:
+      - ".github/labels.yaml"
+      - ".github/workflows/labels.yaml"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  labeler:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Apply labels
+        uses: crazy-max/ghaction-github-labeler@v5
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          yaml-file: .github/labels.yaml
+          dry-run: ${{ github.event_name == 'pull_request' }}

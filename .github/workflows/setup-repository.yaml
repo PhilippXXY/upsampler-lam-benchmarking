@@ -1,0 +1,225 @@
+# Workflow to automatically configure repository settings when created from template.
+# Runs once when the repository is created from the template.
+#
+# LIMITATIONS:
+# The default GITHUB_TOKEN cannot modify repository settings or create rulesets.
+# For full automatic setup, users must create an ADMIN_TOKEN secret with a PAT
+# that has 'repo' and 'admin:repo' scopes.
+#
+# Without ADMIN_TOKEN:
+# - Repository settings (merge options, default branch) will NOT be configured
+# - Branch protection / rulesets will NOT be configured
+# - Only labels will be synced (via sync-labels workflow)
+#
+# Private repos also require GitHub Pro/Team/Enterprise for rulesets.
+name: Setup Repository
+
+on:
+  # Allow manual trigger for retries
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install yq for YAML parsing
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Check for ADMIN_TOKEN
+        id: token_check
+        env:
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          if [ -n "$ADMIN_TOKEN" ]; then
+            echo "has_token=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_token=false" >> $GITHUB_OUTPUT
+            echo "::warning::ADMIN_TOKEN secret not found. Repository settings cannot be configured."
+            echo "To enable automatic setup, create a Personal Access Token with 'repo' and 'admin:repo' scopes"
+            echo "and add it as a repository secret named ADMIN_TOKEN."
+          fi
+
+      - name: Setup repository settings
+        id: repo_settings
+        if: steps.token_check.outputs.has_token == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          echo "Configuring repository settings..."
+
+          SETTINGS_FILE=".github/settings.yaml"
+          
+          # Build JSON payload dynamically from all repository settings
+          PAYLOAD=$(yq '.repository' "$SETTINGS_FILE" -o=json)
+          
+          echo "Applying settings: $(echo "$PAYLOAD" | jq -c .)"
+          
+          # Apply repository settings dynamically
+          if echo "$PAYLOAD" | gh api repos/${{ github.repository }} \
+            --method PATCH \
+            --input -; then
+            echo "success=true" >> $GITHUB_OUTPUT
+            echo "Repository settings configured from settings.yaml"
+          else
+            echo "success=false" >> $GITHUB_OUTPUT
+            echo "Failed to configure repository settings"
+          fi
+
+      - name: Setup security settings
+        id: security_settings
+        if: steps.token_check.outputs.has_token == 'true' && steps.repo_settings.outputs.success == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        continue-on-error: true
+        run: |
+          echo "Configuring security settings..."
+          
+          SETTINGS_FILE=".github/settings.yaml"
+          
+          # Check if security section exists
+          if ! yq '.security' "$SETTINGS_FILE" > /dev/null 2>&1 || [ "$(yq '.security' "$SETTINGS_FILE")" = "null" ]; then
+            echo "No security settings defined in settings.yaml, skipping..."
+            exit 0
+          fi
+          
+          # Apply security settings dynamically
+          SECURITY_PAYLOAD=$(yq '.security' "$SETTINGS_FILE" -o=json)
+          echo "Applying security settings: $(echo "$SECURITY_PAYLOAD" | jq -c .)"
+          
+          # Apply each security setting (some may require different API endpoints)
+          if echo "$SECURITY_PAYLOAD" | jq -e '.private_vulnerability_reporting' > /dev/null; then
+            PVR=$(echo "$SECURITY_PAYLOAD" | jq -r '.private_vulnerability_reporting')
+            if [ "$PVR" = "true" ]; then
+              gh api repos/${{ github.repository }}/private-vulnerability-reporting --method PUT || echo "Could not enable private vulnerability reporting"
+            fi
+          fi
+
+      - name: Setup branch protection
+        id: rulesets
+        if: steps.token_check.outputs.has_token == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          echo "Attempting to configure rulesets..."
+          RULESETS_SUCCESS=true
+          SETTINGS_FILE=".github/settings.yaml"
+
+          # Check if rulesets section exists
+          if ! yq '.rulesets' "$SETTINGS_FILE" > /dev/null 2>&1; then
+            echo "No rulesets defined in settings.yaml, skipping..."
+            echo "success=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check if we can access rulesets (requires admin permissions)
+          if ! gh api repos/${{ github.repository }}/rulesets --silent 2>/dev/null; then
+            echo "Cannot access rulesets API. This could mean:"
+            echo "   - Private repository on Free plan (rulesets require Pro/Team/Enterprise)"
+            echo "   - Insufficient permissions"
+            echo ""
+            echo "To enable branch protection, either:"
+            echo "   1. Make the repository public, OR"
+            echo "   2. Upgrade to GitHub Pro/Team, OR"
+            echo "   3. Add an ADMIN_TOKEN secret with a PAT that has 'repo' and 'admin:repo' scopes"
+            echo ""
+            echo "Skipping branch protection setup..."
+            echo "success=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Process each ruleset from settings.yaml
+          RULESET_COUNT=$(yq '.rulesets | length' "$SETTINGS_FILE")
+          
+          for ((i=0; i<$RULESET_COUNT; i++)); do
+            RULESET_NAME=$(yq ".rulesets[$i].name" "$SETTINGS_FILE")
+            RULESET_TARGET=$(yq ".rulesets[$i].target" "$SETTINGS_FILE")
+            
+            echo "Processing ruleset: $RULESET_NAME"
+            
+            # Check if ruleset already exists
+            EXISTING_RULESET=$(gh api repos/${{ github.repository }}/rulesets --jq ".[] | select(.name == \"$RULESET_NAME\") | .id" 2>/dev/null || echo "")
+            
+            if [ -n "$EXISTING_RULESET" ]; then
+              echo "Ruleset '$RULESET_NAME' already exists (ID: $EXISTING_RULESET), skipping..."
+              continue
+            fi
+            
+            # Generate ruleset JSON from settings.yaml
+            yq ".rulesets[$i]" "$SETTINGS_FILE" -o=json > "/tmp/ruleset-$i.json"
+            
+            # Create the ruleset
+            if gh api repos/${{ github.repository }}/rulesets \
+              --method POST \
+              --input "/tmp/ruleset-$i.json"; then
+              echo "Ruleset '$RULESET_NAME' created successfully"
+            else
+              echo "Failed to create ruleset '$RULESET_NAME'"
+              RULESETS_SUCCESS=false
+            fi
+          done
+
+          echo "success=$RULESETS_SUCCESS" >> $GITHUB_OUTPUT
+
+      - name: Sync labels
+        if: steps.token_check.outputs.has_token == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Triggering label sync workflow..."
+          gh workflow run sync-labels.yaml || echo "Could not trigger sync-labels workflow"
+
+      - name: Setup complete
+        if: steps.repo_settings.outputs.success == 'true'
+        run: |
+          RULESETS_STATUS="${{ steps.rulesets.outputs.success }}"
+
+          echo ""
+          echo "Repository setup complete!"
+          echo ""
+          echo "The following was configured:"
+          echo "  - Repository settings (from settings.yaml)"
+          echo "  - Labels (triggered sync-labels workflow)"
+          if [ "$RULESETS_STATUS" = "true" ]; then
+            echo "  - Branch/tag protection rulesets (from settings.yaml)"
+          else
+            echo "  - Branch/tag protection: SKIPPED (requires public repo or Pro plan)"
+          fi
+
+      - name: Setup incomplete - no ADMIN_TOKEN
+        if: steps.token_check.outputs.has_token == 'false'
+        run: |
+          echo ""
+          echo "=============================================="
+          echo "REPOSITORY SETUP INCOMPLETE"
+          echo "=============================================="
+          echo ""
+          echo "The ADMIN_TOKEN secret is required to configure:"
+          echo "  - Repository settings (merge options, default branch)"
+          echo "  - Branch protection rules"
+          echo "  - Tag protection rules"
+          echo ""
+          echo "To complete setup:"
+          echo "  1. Create a Personal Access Token (PAT) at https://github.com/settings/tokens"
+          echo "     with 'repo' and 'admin:repo' scopes"
+          echo "  2. Add it as a repository secret named 'ADMIN_TOKEN'"
+          echo "  3. Re-run this workflow manually"
+          echo ""
+          echo "Alternatively, configure these settings manually in repository Settings."
+          echo ""
+
+      - name: Setup failed
+        if: steps.repo_settings.outputs.success == 'false'
+        run: |
+          echo "::error::Repository setup failed. Check the logs above for details."
+          echo "You can re-run this workflow manually after fixing the issue."
+          exit 1
