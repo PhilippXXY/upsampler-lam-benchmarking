@@ -1,0 +1,92 @@
+# Git
+.git/
+.gitignore
+
+# GitHub
+.github/
+
+# Documentation
+*.md
+LICENSE
+
+# Assets
+assets/
+
+# Python bytecode and caches
+__pycache__/
+*.py[codz]
+*$py.class
+*.so
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+.cache
+*.cover
+*.py.cover
+coverage.xml
+nosetests.xml
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+create/
+
+# Distribution / packaging
+build/
+dist/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.Python
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Data directories (exclude by default; re-include the bundled LOCATA evaluation archive below)
+data/**
+!data/
+!data/locata/
+output/
+logs/
+
+# Bundled LOCATA evaluation archive for the embedded-data image
+!data/locata/archives/
+!data/locata/archives/dev.zip
+
+# Devcontainer
+.devcontainer/
+
+# Misc
+up/
+*.log
+*.spec
+*.manifest

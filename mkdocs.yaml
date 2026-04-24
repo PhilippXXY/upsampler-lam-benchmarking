@@ -1,0 +1,95 @@
+site_name: Upsampler LAM Benchmarking
+site_url: https://philippxxy.github.io/upsampler-lam-benchmarking/
+site_description: Documentation for the Upsampler/LAM benchmarking framework.
+repo_url: https://github.com/PhilippXXY/upsampler-lam-benchmarking
+repo_name: PhilippXXY/upsampler-lam-benchmarking
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+  features:
+    - content.code.copy
+    - navigation.top
+    - search.highlight
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: numpy
+            members_order: source
+            show_root_heading: true
+            show_root_full_path: false
+            show_source: false
+            show_signature_annotations: true
+
+markdown_extensions:
+  - tables
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - toc:
+      permalink: true
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Overview: index.md
+  - Getting Started: getting-started.md
+  - Workflows:
+      - Local Inference: workflows/local-inference.md
+      - Docker Inference: workflows/docker-inference.md
+      - Batch Benchmarking: workflows/batch-benchmarking.md
+      - Scientific Benchmarking:
+          - Overview: workflows/scientific-benchmarking.md
+          - Latency Methodology: workflows/benchmarking/latency.md
+          - Peak-Memory Methodology: workflows/benchmarking/memory.md
+          - DoA Extraction Pipeline: workflows/benchmarking/doa-extraction.md
+      - Upsampler Training: workflows/upsampler-training.md
+      - End-to-End Training: workflows/end-to-end-training.md
+  - Configuration Reference:
+      - Inference Config: reference/inference-config.md
+      - Upsampler Training Config: reference/train-upsamplers-config.md
+      - End-to-End Training Config: reference/train-end-to-end-config.md
+  - Datasets:
+      - LOCATA: datasets/locata.md
+      - STARSS23: datasets/starss23.md
+      - AudibleLight: datasets/audiblelight.md
+      - EigenScape: datasets/eigenscape.md
+  - Models:
+      - Model Overview: models/overview.md
+      - Training Overview: models/training-overview.md
+      - LAM and UpLAM: models/lam-family.md
+      - Bicubic Baseline: models/bicubic.md
+      - SRCNN: models/srcnn.md
+      - IMDN: models/imdn.md
+      - SAFMN: models/safmn.md
+      - GAN: models/gan.md
+      - AINN: models/ainn.md
+  - Architecture:
+      - Inference Pipeline: architecture/inference-pipeline.md
+      - Training Pipeline: architecture/training-pipeline.md
+      - Data and Extension Points: architecture/data-and-extension-points.md
+  - Extending:
+      - Custom Datasets: extending/datasets.md
+      - Custom Upsamplers: extending/upsamplers.md
+      - Custom Wrappers: extending/wrappers.md
+  - References: references.md
+  - Acknowledgments: acknowledgments.md

@@ -1,0 +1,79 @@
+# Configuration file for Upsampler/LAM inference
+
+inference:
+  # --- Retained Variant Selection ---
+  model_variant: "ganlam_e2e_upfroz"
+
+  # --- Benchmark Baselines ---
+  benchmark_targets:
+    - "lam"
+    - "uplam"
+    - "bicubiclam"
+    - "srcnnlam"
+    - "imdnlam"
+    - "safmnlam"
+    - "ganlam"
+    - "ainnlam"
+
+  # --- Dataset & Channel Selection ---
+  data_set: "locata"
+  locata_low_channel_indices: [5, 9, 21, 25]
+  # locata_tasks: ["task1", "task2", "task3", "task4"]
+
+  # --- Signal Processing Parameters ---
+  sampling_rate: 24000
+  frame_width_ms: 100
+  max_audio_length_sec: 0
+  visibility_diagonal_loading: 1.0e-10
+  visibility_eigenvalue_floor: 1.0e-12
+
+  # --- File Selection & Loading ---
+  batch_size: 1
+  num_workers: 4
+  max_files: 0
+  file_selection_mode: "stratified"
+  file_selection_seed: 0
+  selected_files: []
+
+  # --- Evaluation Metrics ---
+  collect_metrics: true
+  latency_warmup_runs: 2
+  latency_measurement_runs: 5
+  memory_warmup_runs: 1
+  memory_measurement_runs: 3
+  memory_poll_interval_ms: 1.0
+  normalised_memory_enabled: false
+  normalised_memory_duration_sec: 10.0
+  normalised_memory_pad_short_files: true
+  benchmark_runtime_only: false
+  class_agnostic_evaluation: true
+  num_classes: 3
+  doa_threshold_deg: 10.0
+  seld_average: "macro"
+
+  # --- Beamforming / Peak Extraction ---
+  n_max: 50
+  max_sources: 3
+  intensity_threshold: 0.0
+  adaptive_k: true
+  peak_ratio_threshold: 0.3
+
+  # --- Output Paths ---
+  output_path: "output"
+
+  # --- Logging ---
+  logging:
+    level: "DEBUG"
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    handlers:
+      - type: "file"
+        filename: "logs/inference_{timestamp}.log"
+        level: "DEBUG"
+        mode: "w"
+      - type: "console"
+        level: "INFO"
+
+# --- Dataset Input Paths ---
+dataset:
+  data_audio_path: "data/locata/eval"
+  data_ground_truth_path: "data/starss23/metadata_dev/dev-test-sony"

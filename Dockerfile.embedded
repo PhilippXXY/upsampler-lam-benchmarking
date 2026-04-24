@@ -1,0 +1,59 @@
+# syntax=docker/dockerfile:1.7
+ARG PYTHON_VERSION=3.13.3
+
+FROM python:${PYTHON_VERSION}-slim-bookworm
+
+# Metadata labels
+LABEL org.opencontainers.image.title="Upsampler-LAM Benchmarking"
+LABEL org.opencontainers.image.description="Benchmarking framework for evaluating upsamplers with the Latent Acoustic Mapping (LAM) model (embedded-data image with bundled LOCATA dev split)"
+LABEL org.opencontainers.image.authors="Philipp Schmidt"
+LABEL org.opencontainers.image.url="https://github.com/PhilippXXY/upsampler-lam-benchmarking"
+LABEL org.opencontainers.image.source="https://github.com/PhilippXXY/upsampler-lam-benchmarking"
+LABEL org.opencontainers.image.documentation="https://github.com/PhilippXXY/upsampler-lam-benchmarking/blob/main/README.md"
+
+ENV VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:${PATH}" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+COPY pyproject.toml uv.lock ./
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+    libsndfile1 \
+    libgeos-dev \
+    libgeos-c1v5 \
+    proj-bin \
+    proj-data \
+    libproj-dev \
+    gcc \
+    g++ \
+    unzip \
+    python3-dev \
+    && uv sync --frozen --no-dev --no-install-project \
+    && apt-get purge -y --auto-remove \
+    libgeos-dev \
+    libproj-dev \
+    gcc \
+    g++ \
+    python3-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /root/.cache/uv
+
+COPY src/ ./src/
+COPY scripts/docker-embedded-entrypoint.sh ./scripts/docker-embedded-entrypoint.sh
+COPY config/inference_config.yaml ./config/inference_config.yaml
+
+# Copy the compressed LOCATA dev archive into the image (eval is too large for most embedded controllers).
+COPY data/locata/archives/dev.zip /opt/locata/dev.zip
+
+RUN mkdir -p /app/output /app/logs /app/data/locata /opt/locata \
+    && chmod 755 ./scripts/docker-embedded-entrypoint.sh \
+    && sha256sum /opt/locata/dev.zip | awk '{print $1}' > /opt/locata/dev.zip.sha256
+
+ENTRYPOINT ["./scripts/docker-embedded-entrypoint.sh"]
+CMD ["python", "src/infer.py", "--config", "/app/config/inference_config.yaml"]

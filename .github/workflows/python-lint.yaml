@@ -1,0 +1,55 @@
+name: Python Lint
+
+on:
+  pull_request:
+    branches: [main, dev]
+
+permissions:
+  contents: write
+
+jobs:
+  python-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.head_ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          token: ${{ secrets.CI_PUSH_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: pyproject.toml
+          check-latest: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Sync dependencies with uv
+        run: uv sync --locked --dev
+
+      - name: Ruff (auto-fix)
+        run: uv run ruff check --fix .
+
+      - name: Ruff (format)
+        run: uv run ruff format .
+
+      - name: Commit and push changes (same-repo PRs only)
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+          git commit -m "chore: auto-fix lint (ruff)"
+          git push origin "HEAD:${{ github.head_ref }}"
+
+      - name: Ruff (verify)
+        run: uv run ruff check .
