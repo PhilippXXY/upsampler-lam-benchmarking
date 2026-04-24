@@ -1,0 +1,98 @@
+# Repository Settings Configuration
+# The setup-repository.yaml workflow will apply these settings automatically.
+#
+# Note: Some settings may require specific GitHub plans or permissions:
+# - Rulesets require public repo OR GitHub Pro/Team/Enterprise for private repos
+# - Some security features require GitHub Advanced Security
+
+# =============================================================================
+# REPOSITORY SETTINGS (General)
+# =============================================================================
+repository:
+  # Features
+  has_issues: true
+  has_wiki: false
+  has_discussions: false
+  has_projects: false
+
+  is_template: false
+
+  # Merge options
+  allow_merge_commit: false      # Disabled - use squash or rebase
+  allow_squash_merge: true       # Enabled
+  allow_rebase_merge: true       # Enabled
+  squash_merge_commit_title: "PR_TITLE"
+  squash_merge_commit_message: "PR_BODY"
+
+  # Branch management
+  delete_branch_on_merge: true   # Auto-delete head branches
+  allow_auto_merge: true         # Allow auto-merge
+  allow_update_branch: true      # Allow updating PR branches
+
+  # Copilot code review
+  enable_copilot_code_review: true  # Automatically request Copilot code review on PRs
+
+# =============================================================================
+# SECURITY SETTINGS
+# =============================================================================
+security:
+
+# =============================================================================
+# RULESETS
+# =============================================================================
+# Rulesets provide fine-grained branch and tag protection rules.
+# Add as many rulesets as needed - the workflow will create them dynamically.
+rulesets:
+  # Branch ruleset for main branch
+  - name: "Protect main branch"
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - "refs/heads/main"
+        exclude: []
+    rules:
+      - type: pull_request
+        parameters:
+          required_approving_review_count: 0
+          dismiss_stale_reviews_on_push: true
+          require_code_owner_review: false
+          require_last_push_approval: false
+          required_review_thread_resolution: true
+      - type: required_status_checks
+        parameters:
+          strict_required_status_checks_policy: true
+          required_status_checks:
+            - context: "type-check"
+            - context: "python-lint"
+            - context: "config-lint"
+      - type: required_linear_history
+      - type: non_fast_forward
+
+  # Branch ruleset for dev branch
+  - name: "Protect dev branch"
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - "refs/heads/dev"
+        exclude: []
+    rules:
+      - type: deletion
+      - type: required_status_checks
+        parameters:
+          strict_required_status_checks_policy: true
+          required_status_checks:
+            - context: "type-check"
+            - context: "python-lint"
+            - context: "config-lint"
+
+# =============================================================================
+# ADDITIONAL CONFIGURATION FILES
+# =============================================================================
+# The following are managed in separate files:
+# - Labels: .github/labels.yml (synced by sync-labels.yaml workflow)
+# - Dependabot: .github/dependabot.yml
+# - Actions permissions: Configured via repository settings (not in this file)
