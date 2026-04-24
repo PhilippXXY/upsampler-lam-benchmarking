@@ -1,0 +1,47 @@
+- name: "bot - dependabot"
+  color: "#000000"
+  description: "Dependabot specific label."
+
+- name: "filter - version"
+  color: "#879d8f"
+  description: "This label will help filter PRs that promote a new version."
+
+- name: "priority - High"
+  color: "#b60205"
+  description: "For task that need immediate attention."
+
+- name: "priority - Medium"
+  color: "#fbca04"
+  description: "For tasks that are important but not urgent."
+
+- name: "priority - Low"
+  color: "#fbca04"
+  description: "For tasks that can be addressed later."
+
+- name: "status - Blocked"
+  color: "#bfdadc"
+  description: "For tasks that cannot proceed due to dependencies or issues."
+
+- name: "status - In Progress"
+  color: "#006b75"
+  description: "For tasks that are currently worked on."
+
+- name: "status - To Do"
+  color: "#1d76db"
+  description: "For tasks or topics that haven't been addressed yet."
+
+- name: "status - Completed"
+  color: "#0e8a16"
+  description: "For tasks that have been finished."
+
+- name: "type of work - Documentation"
+  color: "#d4c5f9"
+  description: "For tasks that need improved documentation."
+
+- name: "type of work - Enhancement"
+  color: "#d4c5f9"
+  description: "For tasks that will enrich the project."
+
+- name: "type of work - Research"
+  color: "#d4c5f9"
+  description: "For tasks related to gathering information or literature."
