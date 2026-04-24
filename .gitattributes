@@ -1,0 +1,4 @@
+*.wav filter=lfs diff=lfs merge=lfs -text
+data/locata/**/audio_array_timestamps_*.txt filter=lfs diff=lfs merge=lfs -text
+data/locata/**/audio_source_timestamps_*.txt filter=lfs diff=lfs merge=lfs -text
+data/locata/archives/*.zip filter=lfs diff=lfs merge=lfs -text

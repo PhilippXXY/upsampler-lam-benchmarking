@@ -1,0 +1,73 @@
+{
+  "name": "upsampler-lam-benchmarking",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "github.vscode-pull-request-github",
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "astral-sh.uv",
+        "mechatroner.rainbow-csv",
+        "shd101wyy.markdown-preview-enhanced",
+        "ms-toolsai.jupyter"
+      ],
+      "settings": {
+        // Python settings
+        "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.unittestEnabled": true,
+        "pylint.enabled": true,
+        // Editor settings
+        "explorer.confirmDragAndDrop": false,
+        "files.autoSave": "afterDelay",
+        "editor.formatOnPaste": true,
+        "editor.formatOnType": true,
+        "editor.formatOnSave": true,
+        "workbench.editor.splitInGroupLayout": "vertical",
+        "editor.unicodeHighlight.invisibleCharacters": true,
+        "editor.unicodeHighlight.ambiguousCharacters": true,
+        "editor.wordWrap": "on",
+        "files.trimTrailingWhitespace": true,
+        "files.insertFinalNewline": true,
+        "workbench.colorTheme": "GitHub Dark Default",
+        "workbench.editor.empty.hint": "hidden",
+        "window.confirmBeforeClose": "keyboardOnly",
+        "diffEditor.ignoreTrimWhitespace": false,
+        "editor.find.autoFindInSelection": "multiline",
+        "git.blame.editorDecoration.enabled": true,
+        "git.blame.editorDecoration.template": "${authorName} (${authorDateAgo})",
+        "githubPullRequests.createOnPublishBranch": "never",
+        "notebook.consolidatedRunButton": true,
+        "notebook.formatOnSave.enabled": true,
+        "notebook.insertFinalNewline": true,
+        "notebook.output.scrolling": true,
+        "python.analysis.typeCheckingMode": "standard",
+        "workbench.tree.indent": 6,
+        "workbench.editor.pinnedTabsOnSeparateRow": true,
+        "window.density.editorTabHeight": "compact",
+        "workbench.editor.doubleClickTabToToggleEditorGroupSizes": "maximize",
+        "workbench.editor.enablePreview": false,
+        "workbench.editor.showTabIndex": true,
+        "workbench.editor.wrapTabs": true,
+        "debug.closeReadonlyTabsOnEnd": true,
+        "window.nativeTabs": true,
+        "editor.renderWhitespace": "trailing",
+        "git.autofetch": true,
+        "githubPullRequests.pullBranch": "never",
+        "workbench.editor.tabSizing": "fixed"
+      }
+    }
+  },
+  "containerEnv": {
+    "UV_LINK_MODE": "copy"
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  }
+}

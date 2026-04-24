@@ -1,0 +1,100 @@
+[project]
+name = "upsampler-lam-benchmarking"
+version = "1.0.0"
+description = "Benchmark Implementation of Different Upsamplers for 32ch LAM."
+readme = "README.md"
+requires-python = "==3.13.3"
+dependencies = [
+    "astropy>=6.0.0",
+    "basemap>=1.4.1",
+    "librosa>=0.11.0",
+    "matplotlib==3.9.2",
+    "numpy==2.1.3",
+    "pandas==2.2.3",
+    "prettytable==3.17.0",
+    "pyyaml==6.0.2",
+    "rich==14.2.0",
+    "scikit-image==0.26.0",
+    "scikit-learn>=1.5.0",
+    "scipy==1.17.0",
+    "soundfile==0.13.1",
+    "torch==2.10.0",
+    "torchvision==0.25.0",
+    "tqdm==4.67.1",
+    "typer==0.15.1",
+    "uvicorn[standard]==0.32.1",
+]
+
+[project.urls]
+Repository = "https://github.com/PhilippXXY/upsampler-lam-benchmarking"
+
+[project.scripts]
+# ml = "ml_core.main:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Development / tooling dependencies for uv
+[dependency-groups]
+dev = [
+    "mkdocstrings-python==2.0.0",
+    "mkdocs==1.6.1",
+    "mkdocs-gen-files==0.6.0",
+    "mkdocs-material==9.7.0",
+    "mkdocs-literate-nav==0.6.2",
+    "rd-mkdocs-puml==1.2.4",
+    "mypy==1.13.0",
+    "pre-commit>=4.5.0",
+    "pylint==3.3.2",
+    "pytest==8.3.0",
+    "ruff==0.8.0",
+    "types-PyYAML==6.0.12",
+]
+
+[tool.mypy]
+check_untyped_defs = true
+disallow_any_generics = true
+disallow_any_unimported = true
+disallow_incomplete_defs = true
+disallow_untyped_defs = true
+warn_return_any = true
+warn_unreachable = true
+warn_unused_ignores = true
+
+[tool.ruff]
+line-length = 100
+exclude = ["src/lam_min"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle (spacing, indentation, etc.)
+  "F",    # pyflakes (unused imports, undefined names)
+  "B",    # flake8-bugbear (common bug patterns)
+  "I",    # isort (import order via Ruff)
+  "D",    # pydocstyle (docstrings, already configured)
+  "PT",   # flake8-pytest-style (pytest best practices)
+  "S",    # flake8-bandit (basic security checks)
+  "C90",  # mccabe (complexity, long functions)
+  "PL",   # pylint-like rules (naming, refactors, misc)
+  "FIX", # flake8-fixme (TODO, FIXME, XXX comments)
+]
+ignore = [
+  "D203",  # one-blank-line-before-class (conflicts with D211)
+  "D213",  # multi-line summary second line (we prefer on first line)
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*" = ["S101"]
+
+[tool.pylint.main]
+init-hook = "import sys; sys.path.append('src')"

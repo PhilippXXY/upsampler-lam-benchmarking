@@ -1,0 +1,8 @@
+2026-02-03 12:42:05,893 - root - INFO - Starting inference...
+2026-02-03 12:42:05,893 - root - INFO - Using device: cpu
+2026-02-03 12:42:05,894 - root - INFO - Loaded dataset: starss23, number of files: 30, batch size: 1, number of workers: 4, frame width (ms): 100, sampling rate: 24000 Hz, max audio length (sec): 0, max files: 3
+2026-02-03 12:42:06,913 - root - INFO - Beginning inference with metrics
+2026-02-03 12:44:08,542 - root - INFO - Inference completed. Processed 3 files.
+2026-02-03 12:44:08,543 - root - INFO - The logs are saved in: upsampler-lam-benchmarking/logs/inference_2026-02-03_12-42-05.log
+2026-02-03 12:44:08,543 - root - INFO - The file's outputs are saved in: upsampler-lam-benchmarking/output
+2026-02-03 12:44:08,590 - root - INFO - Metrics saved to: upsampler-lam-benchmarking/output/metrics_2026-02-03_12-42-05.json
