@@ -1,0 +1,158 @@
+name: Create Release from PR
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  prepare:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_stable: ${{ steps.check-stable.outputs.is_stable }}
+
+    steps:
+      - name: Extract version from PR title
+        id: version
+        run: |
+          title="${{ github.event.pull_request.title }}"
+          echo "PR title: $title"
+
+          # Accept (v1.2.3, v01.02.300, v1.2.3-alpha) and the same without 'v'
+          if echo "$title" | grep -Eq '^v[0-9]+(\.[0-9]+){2}(-[0-9A-Za-z.-]+)?$'; then
+            version="$title"
+          elif echo "$title" | grep -Eq '^[0-9]+(\.[0-9]+){2}(-[0-9A-Za-z.-]+)?$'; then
+            version="v$title"
+          else
+            echo "PR title is not a valid version (expected vX.Y.Z, vX.Y.Z-suffix, or X.Y.Z, got: $title)"
+            exit 1
+          fi
+
+          echo "Using version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check if stable release
+        id: check-stable
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Stable if no prerelease suffix (e.g., -alpha, -beta, -rc)
+          if echo "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "is_stable=true" >> "$GITHUB_OUTPUT"
+            echo "Version $VERSION is stable"
+          else
+            echo "is_stable=false" >> "$GITHUB_OUTPUT"
+            echo "Version $VERSION is a prerelease"
+          fi
+
+  docker_images:
+    needs: prepare
+    uses: ./.github/workflows/docker.yaml
+    with:
+      tag: ${{ needs.prepare.outputs.version }}
+      publish_latest: ${{ needs.prepare.outputs.is_stable == 'true' }}
+      git_ref: ${{ github.event.pull_request.merge_commit_sha }}
+      allow_failure: true
+
+  tag_and_release:
+    needs:
+      - prepare
+      - docker_images
+    if: always() && needs.prepare.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository metadata
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+          lfs: false
+          sparse-checkout: .
+
+      - name: Compose release body
+        id: release-body
+        run: |
+          DOCKER_WORKFLOW_RESULT="${{ needs.docker_images.result }}"
+
+          if [ "$DOCKER_WORKFLOW_RESULT" != "success" ]; then
+            printf '%s\n' \
+              'Container images:' \
+              '- Standard: Docker publish workflow failed before image status could be collected' \
+              '- Embedded-data: Docker publish workflow failed before image status could be collected' \
+              '' \
+              'Some Docker images were not published. The source release is still available.' \
+              > release_body.md
+            exit 0
+          fi
+
+          STANDARD_STATUS="${{ needs.docker_images.outputs.standard_status }}"
+          STANDARD_IMAGE="${{ needs.docker_images.outputs.standard_image }}"
+          STANDARD_DIGEST="${{ needs.docker_images.outputs.standard_digest }}"
+          STANDARD_FAILURE_STEP="${{ needs.docker_images.outputs.standard_failure_step }}"
+
+          EMBEDDED_STATUS="${{ needs.docker_images.outputs.embedded_status }}"
+          EMBEDDED_IMAGE="${{ needs.docker_images.outputs.embedded_image }}"
+          EMBEDDED_DIGEST="${{ needs.docker_images.outputs.embedded_digest }}"
+          EMBEDDED_FAILURE_STEP="${{ needs.docker_images.outputs.embedded_failure_step }}"
+
+          {
+            echo "Container images:"
+            if [ "$STANDARD_STATUS" = "published" ]; then
+              echo "- Standard: ${STANDARD_IMAGE}"
+              echo "- Standard digest: ${STANDARD_IMAGE}@${STANDARD_DIGEST}"
+            else
+              echo "- Standard: build failed in GitHub Actions (step: ${STANDARD_FAILURE_STEP:-unknown})"
+            fi
+
+            if [ "$EMBEDDED_STATUS" = "published" ]; then
+              echo "- Embedded-data: ${EMBEDDED_IMAGE}"
+              echo "- Embedded-data digest: ${EMBEDDED_IMAGE}@${EMBEDDED_DIGEST}"
+            else
+              echo "- Embedded-data: build failed in GitHub Actions (step: ${EMBEDDED_FAILURE_STEP:-unknown})"
+            fi
+
+            if [ "$STANDARD_STATUS" != "published" ] || [ "$EMBEDDED_STATUS" != "published" ]; then
+              echo
+              echo "Some Docker images were not published. The source release is still available."
+            fi
+
+            if [ "$STANDARD_STATUS" = "published" ]; then
+              echo
+              echo "Pull standard:"
+              echo "docker pull ${STANDARD_IMAGE}"
+            fi
+
+            if [ "$EMBEDDED_STATUS" = "published" ]; then
+              echo
+              echo "Pull embedded-data:"
+              echo "docker pull ${EMBEDDED_IMAGE}"
+            fi
+          } > release_body.md
+
+      - name: Create git tag for merge commit
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          MERGE_SHA="${{ github.event.pull_request.merge_commit_sha }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          echo "Tagging commit $MERGE_SHA with $VERSION"
+          git tag "$VERSION" "$MERGE_SHA"
+          git push origin "$VERSION"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.version }}
+          name: ${{ needs.prepare.outputs.version }}
+          generate_release_notes: true
+          body_path: release_body.md
+          draft: false
+          prerelease: ${{ needs.prepare.outputs.is_stable != 'true' }}

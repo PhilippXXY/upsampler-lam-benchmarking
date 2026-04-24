@@ -1,0 +1,269 @@
+name: Reusable Docker Image Build
+
+on:
+  workflow_call:
+    inputs:
+      git_ref:
+        required: true
+        type: string
+      primary_image:
+        required: true
+        type: string
+      tags:
+        required: true
+        type: string
+      dockerfile:
+        required: true
+        type: string
+      platforms:
+        required: true
+        type: string
+      checkout_paths:
+        required: true
+        type: string
+      lfs_include:
+        required: false
+        default: ""
+        type: string
+      lfs_verify_path:
+        required: false
+        default: ""
+        type: string
+      use_cache:
+        required: false
+        default: false
+        type: boolean
+      cache_scope:
+        required: false
+        default: ""
+        type: string
+      provenance:
+        required: false
+        default: true
+        type: boolean
+      allow_failure:
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      image:
+        description: "Primary image tag"
+        value: ${{ jobs.build.outputs.image }}
+      status:
+        description: "Publish status"
+        value: ${{ jobs.build.outputs.status }}
+      digest:
+        description: "Published digest"
+        value: ${{ jobs.build.outputs.digest }}
+      failure_step:
+        description: "First failed step"
+        value: ${{ jobs.build.outputs.failure_step }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.outcome.outputs.image }}
+      status: ${{ steps.outcome.outputs.status }}
+      digest: ${{ steps.outcome.outputs.digest }}
+      failure_step: ${{ steps.outcome.outputs.failure_step }}
+    steps:
+      - name: Checkout build context
+        id: checkout
+        continue-on-error: ${{ inputs.allow_failure }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.git_ref }}
+          lfs: false
+          sparse-checkout: ${{ inputs.checkout_paths }}
+
+      - name: Free disk space before build
+        id: cleanup
+        continue-on-error: ${{ inputs.allow_failure }}
+        run: |
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/hostedtoolcache
+          docker system prune -af || true
+          df -h
+
+      - name: Set up QEMU
+        id: qemu
+        continue-on-error: ${{ inputs.allow_failure }}
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        id: buildx
+        continue-on-error: ${{ inputs.allow_failure }}
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        id: login
+        continue-on-error: ${{ inputs.allow_failure }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Extract Python version from pyproject.toml
+        id: python-version
+        continue-on-error: ${{ inputs.allow_failure }}
+        run: |
+          VERSION=$(grep -oP '(?<=requires-python = "==)\d+\.\d+\.\d+' pyproject.toml)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch Git LFS objects
+        id: fetch_lfs
+        if: ${{ inputs.lfs_include != '' }}
+        continue-on-error: ${{ inputs.allow_failure }}
+        run: |
+          git lfs install --local
+          git lfs pull --include="${{ inputs.lfs_include }}"
+          git lfs checkout "${{ inputs.lfs_verify_path }}"
+
+      - name: Verify Git LFS checkout
+        id: verify_lfs
+        if: ${{ inputs.lfs_include != '' }}
+        continue-on-error: ${{ inputs.allow_failure }}
+        run: |
+          POINTER_FOUND=0
+
+          VERIFY_PATH="${{ inputs.lfs_verify_path }}"
+          if [ ! -e "$VERIFY_PATH" ]; then
+            echo "Expected checkout path missing: $VERIFY_PATH"
+            exit 1
+          fi
+
+          if [ -d "$VERIFY_PATH" ]; then
+            FIND_ARGS=("$VERIFY_PATH" -type f -print0)
+          else
+            FIND_ARGS=("$VERIFY_PATH" -print0)
+          fi
+
+          while IFS= read -r -d '' file; do
+            if [ "$(head -n 1 "$file" 2>/dev/null)" = "version https://git-lfs.github.com/spec/v1" ]; then
+              echo "Unresolved Git LFS pointer: $file"
+              POINTER_FOUND=1
+            fi
+          done < <(find "${FIND_ARGS[@]}")
+
+          if [ "$POINTER_FOUND" -ne 0 ]; then
+            echo "Git LFS checkout is incomplete."
+            exit 1
+          fi
+
+          du -sh "$VERIFY_PATH"
+
+      - name: Build and push Docker image
+        id: build_cached
+        if: ${{ inputs.use_cache }}
+        continue-on-error: ${{ inputs.allow_failure }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ inputs.dockerfile }}
+          push: true
+          tags: ${{ inputs.tags }}
+          build-args: |
+            PYTHON_VERSION=${{ steps.python-version.outputs.version }}
+          platforms: ${{ inputs.platforms }}
+          cache-from: type=gha,scope=${{ inputs.cache_scope }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.cache_scope }}
+          provenance: ${{ inputs.provenance }}
+
+      - name: Build and push Docker image
+        id: build_uncached
+        if: ${{ !inputs.use_cache }}
+        continue-on-error: ${{ inputs.allow_failure }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ inputs.dockerfile }}
+          push: true
+          tags: ${{ inputs.tags }}
+          build-args: |
+            PYTHON_VERSION=${{ steps.python-version.outputs.version }}
+          platforms: ${{ inputs.platforms }}
+          provenance: ${{ inputs.provenance }}
+
+      - name: Capture build outcome
+        id: outcome
+        if: always()
+        run: |
+          CHECKOUT="${{ steps.checkout.conclusion }}"
+          CLEANUP="${{ steps.cleanup.conclusion }}"
+          QEMU="${{ steps.qemu.conclusion }}"
+          BUILDX="${{ steps.buildx.conclusion }}"
+          LOGIN="${{ steps.login.conclusion }}"
+          PYTHON_VERSION="${{ steps.python-version.conclusion }}"
+          FETCH_LFS_ENABLED="false"
+          if [ -n "${{ inputs.lfs_include }}" ]; then
+            FETCH_LFS_ENABLED="true"
+          fi
+          FETCH_LFS="${{ steps.fetch_lfs.conclusion }}"
+          VERIFY_LFS="${{ steps.verify_lfs.conclusion }}"
+          BUILD_CACHED="${{ steps.build_cached.conclusion }}"
+          BUILD_UNCACHED="${{ steps.build_uncached.conclusion }}"
+          DIGEST_CACHED="${{ steps.build_cached.outputs.digest }}"
+          DIGEST_UNCACHED="${{ steps.build_uncached.outputs.digest }}"
+          STATUS="failed"
+          FAILURE_STEP=""
+          DIGEST=""
+
+          if [ "$BUILD_CACHED" != "" ] && [ "$BUILD_CACHED" != "skipped" ]; then
+            BUILD="$BUILD_CACHED"
+            DIGEST="$DIGEST_CACHED"
+          else
+            BUILD="$BUILD_UNCACHED"
+            DIGEST="$DIGEST_UNCACHED"
+          fi
+
+          if [ "$BUILD" = "success" ]; then
+            STATUS="published"
+          else
+            for pair in \
+              "checkout:$CHECKOUT" \
+              "cleanup:$CLEANUP" \
+              "qemu:$QEMU" \
+              "buildx:$BUILDX" \
+              "login:$LOGIN" \
+              "python_version:$PYTHON_VERSION"; do
+              STEP_NAME="${pair%%:*}"
+              STEP_STATE="${pair#*:}"
+              if [ "$STEP_STATE" != "success" ]; then
+                FAILURE_STEP="$STEP_NAME"
+                break
+              fi
+            done
+
+            if [ -z "$FAILURE_STEP" ] && [ "$FETCH_LFS_ENABLED" = "true" ]; then
+              for pair in \
+                "fetch_lfs:$FETCH_LFS" \
+                "verify_lfs:$VERIFY_LFS"; do
+                STEP_NAME="${pair%%:*}"
+                STEP_STATE="${pair#*:}"
+                if [ "$STEP_STATE" != "success" ]; then
+                  FAILURE_STEP="$STEP_NAME"
+                  break
+                fi
+              done
+            fi
+
+            if [ -z "$FAILURE_STEP" ]; then
+              FAILURE_STEP="build"
+            fi
+
+            DIGEST=""
+          fi
+
+          echo "image=${{ inputs.primary_image }}" >> "$GITHUB_OUTPUT"
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "failure_step=$FAILURE_STEP" >> "$GITHUB_OUTPUT"

@@ -1,0 +1,112 @@
+name: Config Lint
+
+on:
+  pull_request:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: config-lint-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  config-lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Ensure config/ exists and list files
+        run: |
+          set -euo pipefail
+
+          if [ ! -d "config" ]; then
+            echo "::error::config/ directory not found."
+            exit 1
+          fi
+
+          echo "Files under config/:"
+          find config -type f -print
+
+      - name: YAML lint
+        id: yamllint
+        uses: ibiqlik/action-yamllint@v3
+        with:
+          file_or_dir: config/
+          config_file: .yamllint
+          format: github
+          strict: true
+
+      - name: Upload yamllint logfile
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: yamllint-log
+          path: ${{ steps.yamllint.outputs.logfile }}
+          if-no-files-found: ignore
+
+      - name: Validate JSON files (parse)
+        run: |
+          set -euo pipefail
+
+          shopt -s nullglob
+          files=(config/**/*.json config/*.json)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No JSON files found under config/."
+            exit 0
+          fi
+
+          for f in "${files[@]}"; do
+            echo "Validating JSON: $f"
+            jq -e . "$f" >/dev/null
+          done
+
+      - name: Set up Python (for TOML parse)
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: pyproject.toml
+          check-latest: true
+
+      - name: Validate TOML files
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import glob
+          import tomllib
+          import sys
+
+          patterns = ["config/**/*.toml", "config/*.toml"]
+          files = []
+          for p in patterns:
+            files.extend(glob.glob(p, recursive=True))
+
+          if not files:
+            print("No TOML files found under config/.")
+            sys.exit(0)
+
+          for f in files:
+            print(f"Validating TOML: {f}")
+            with open(f, "rb") as fp:
+              tomllib.load(fp)
+
+          print("TOML validation OK.")
+          PY
+
+      - name: Install pyproject validator
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install "validate-pyproject[all]"
+
+      - name: Validate pyproject.toml (validate-pyproject)
+        run: |
+          set -euo pipefail
+          validate-pyproject pyproject.toml

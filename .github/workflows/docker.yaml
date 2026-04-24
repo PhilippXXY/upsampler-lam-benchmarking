@@ -1,0 +1,156 @@
+name: Build and Push Docker Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag (e.g., v1.0.0, dev)"
+        required: true
+        default: "dev"
+        type: string
+      publish_latest:
+        description: "Also publish latest/latest-embedded tags"
+        required: false
+        default: false
+        type: boolean
+      git_ref:
+        description: "Git ref to build (defaults to the triggering SHA)"
+        required: false
+        default: ""
+        type: string
+      allow_failure:
+        description: "Keep the workflow green even if an image build fails"
+        required: false
+        default: false
+        type: boolean
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      publish_latest:
+        required: false
+        default: false
+        type: boolean
+      git_ref:
+        required: false
+        default: ""
+        type: string
+      allow_failure:
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      standard_image:
+        description: "Primary standard image tag"
+        value: ${{ jobs.prepare.outputs.standard_image }}
+      standard_status:
+        description: "Standard image publish status"
+        value: ${{ jobs.build_standard.outputs.status }}
+      standard_digest:
+        description: "Standard image digest"
+        value: ${{ jobs.build_standard.outputs.digest }}
+      standard_failure_step:
+        description: "First failed standard-image step"
+        value: ${{ jobs.build_standard.outputs.failure_step }}
+      embedded_image:
+        description: "Primary embedded image tag"
+        value: ${{ jobs.prepare.outputs.embedded_image }}
+      embedded_status:
+        description: "Embedded image publish status"
+        value: ${{ jobs.build_embedded.outputs.status }}
+      embedded_digest:
+        description: "Embedded image digest"
+        value: ${{ jobs.build_embedded.outputs.digest }}
+      embedded_failure_step:
+        description: "First failed embedded-image step"
+        value: ${{ jobs.build_embedded.outputs.failure_step }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      git_ref: ${{ steps.meta.outputs.git_ref }}
+      standard_tags: ${{ steps.meta.outputs.standard_tags }}
+      standard_image: ${{ steps.meta.outputs.standard_image }}
+      embedded_tags: ${{ steps.meta.outputs.embedded_tags }}
+      embedded_image: ${{ steps.meta.outputs.embedded_image }}
+    steps:
+      - name: Compute build metadata
+        id: meta
+        run: |
+          REPO_LOWER="$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          TAG="${{ inputs.tag }}"
+          BUILD_REF="${{ inputs.git_ref }}"
+          PUBLISH_LATEST="${{ inputs.publish_latest }}"
+
+          if [ -z "$BUILD_REF" ]; then
+            BUILD_REF="${GITHUB_SHA}"
+          fi
+
+          STANDARD_IMAGE="ghcr.io/${REPO_LOWER}:${TAG}"
+          EMBEDDED_IMAGE="ghcr.io/${REPO_LOWER}:${TAG}-embedded"
+
+          if [ "$PUBLISH_LATEST" = "true" ]; then
+            STANDARD_TAGS="${STANDARD_IMAGE},ghcr.io/${REPO_LOWER}:latest"
+            EMBEDDED_TAGS="${EMBEDDED_IMAGE},ghcr.io/${REPO_LOWER}:latest-embedded"
+          else
+            STANDARD_TAGS="${STANDARD_IMAGE}"
+            EMBEDDED_TAGS="${EMBEDDED_IMAGE}"
+          fi
+
+          echo "Using git ref: ${BUILD_REF}"
+          echo "Using standard image tags: ${STANDARD_TAGS}"
+          echo "Using embedded-data image tags: ${EMBEDDED_TAGS}"
+
+          echo "git_ref=${BUILD_REF}" >> "$GITHUB_OUTPUT"
+          echo "standard_tags=${STANDARD_TAGS}" >> "$GITHUB_OUTPUT"
+          echo "standard_image=${STANDARD_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "embedded_tags=${EMBEDDED_TAGS}" >> "$GITHUB_OUTPUT"
+          echo "embedded_image=${EMBEDDED_IMAGE}" >> "$GITHUB_OUTPUT"
+
+  build_standard:
+    needs: prepare
+    uses: ./.github/workflows/docker-build-reusable.yaml
+    with:
+      git_ref: ${{ needs.prepare.outputs.git_ref }}
+      primary_image: ${{ needs.prepare.outputs.standard_image }}
+      tags: ${{ needs.prepare.outputs.standard_tags }}
+      dockerfile: ./Dockerfile
+      platforms: linux/amd64,linux/arm64
+      checkout_paths: |
+        .
+        src
+        config
+      lfs_include: ""
+      lfs_verify_path: ""
+      use_cache: true
+      cache_scope: standard-image
+      provenance: true
+      allow_failure: ${{ inputs.allow_failure }}
+
+  build_embedded:
+    needs: prepare
+    uses: ./.github/workflows/docker-build-reusable.yaml
+    with:
+      git_ref: ${{ needs.prepare.outputs.git_ref }}
+      primary_image: ${{ needs.prepare.outputs.embedded_image }}
+      tags: ${{ needs.prepare.outputs.embedded_tags }}
+      dockerfile: ./Dockerfile.embedded
+      platforms: linux/arm64
+      checkout_paths: |
+        .
+        src
+        config
+        scripts
+        data/locata/archives
+      lfs_include: data/locata/archives/eval.zip
+      lfs_verify_path: data/locata/archives/eval.zip
+      use_cache: false
+      cache_scope: ""
+      provenance: false
+      allow_failure: ${{ inputs.allow_failure }}
