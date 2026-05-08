@@ -17,12 +17,14 @@ from typing import Any
 import numpy as np
 import torch
 import yaml
+from numpy.typing import NDArray
 from torch.utils.data import DataLoader
-from tqdm import tqdm
-from tqdm.contrib.logging import logging_redirect_tqdm
+from tqdm import tqdm  # type: ignore[import-untyped]
+from tqdm.contrib.logging import logging_redirect_tqdm  # type: ignore[import-untyped]
 
 from lam_min.dataset.gen_dataset.gen_dataset import get_visibility_matrix
 from lam_min.doa_metrics import compute_seld_metrics_for_files
+from lam_min.trainer.utils import get_field
 from lam_min.util.utils import (
     load_ainn_lam_state,
     load_bicubic_lam_state,
@@ -32,6 +34,13 @@ from lam_min.util.utils import (
     load_safmn_lam_state,
     load_srcnn_lam_state,
     resolve_safmn_inference_architecture,
+)
+from utils.acoustic_map_visualisation import (
+    DEFAULT_PNG_DPI,
+    VALID_VISUALISATION_MODES,
+    positive_int,
+    render_combined_acoustic_maps,
+    resolve_visualisation_modes,
 )
 from utils.cmd_metrics import (
     add_cmd_metrics,
@@ -81,6 +90,59 @@ LAM_ARTIFACT_OUTPUT_KEYS = (
     "lam_denoise3",
     "lam_denoise4",
 )
+
+NOISY_LIBRARY_LOGGERS = (
+    "matplotlib",
+    "PIL",
+    "imageio",
+)
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    """
+    Build the inference command-line parser.
+
+    Returns
+    -------
+    argparse.ArgumentParser
+        Configured parser for ``src/infer.py``.
+    """
+    parser = argparse.ArgumentParser("Inference script")
+    parser.add_argument(
+        "--device",
+        default="cpu",
+        type=str,
+        help="Device to run inference on (e.g., 'cpu', 'mps', or 'cuda').",
+    )
+    parser.add_argument(
+        "--config",
+        default="config/inference_config.yaml",
+        type=str,
+        help="Path to the inference configuration YAML file.",
+    )
+    parser.add_argument(
+        "--visualise",
+        action="store_true",
+        help="Save combined RGB acoustic-map PNG frames plus GIF and MP4 media.",
+    )
+    parser.add_argument(
+        "--mode",
+        nargs="+",
+        choices=VALID_VISUALISATION_MODES,
+        default=None,
+        help=(
+            "Optional visualisation modes. Available values: "
+            "'latex-font-only', 'no-title', 'save-eps', and 'save-svg'. "
+            "You may pass any combination."
+        ),
+    )
+    parser.add_argument(
+        "--png-dpi",
+        default=DEFAULT_PNG_DPI,
+        type=positive_int,
+        help=f"Resolution in DPI for saved visualisation PNG files. Defaults to {DEFAULT_PNG_DPI}.",
+    )
+    return parser
 
 
 def _extract_csm_stage_outputs(model: torch.nn.Module) -> dict[str, torch.Tensor]:
@@ -258,6 +320,9 @@ def setup_logging(inference_config: dict[str, Any]) -> str | None:
                 console_handler.setLevel(getattr(logging, handler_config.get("level", "INFO")))
                 console_handler.setFormatter(formatter)
                 logger.addHandler(console_handler)
+
+        for logger_name in NOISY_LIBRARY_LOGGERS:
+            logging.getLogger(logger_name).setLevel(logging.WARNING)
 
     return log_filename
 
@@ -502,20 +567,9 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
     '''
     """
     ## Parameters
-    parser = argparse.ArgumentParser("Inference script")
-    parser.add_argument(
-        "--device",
-        default="cpu",
-        type=str,
-        help="Device to run inference on (e.g., 'cpu', 'mps', or 'cuda').",
-    )
-    parser.add_argument(
-        "--config",
-        default="config/inference_config.yaml",
-        type=str,
-        help="Path to the inference configuration YAML file.",
-    )
+    parser = build_arg_parser()
     args = parser.parse_args()
+    visualisation_modes = resolve_visualisation_modes(args.mode)
 
     ## Configurations
     repo_root = Path(__file__).resolve().parents[1]
@@ -558,7 +612,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
     device = resolve_requested_device(
         args.device,
         mps_fallback_reason=(
-            "Model " f"'{model_name}' uses lam_min, which is configured for CPU/CUDA in this repo."
+            f"Model '{model_name}' uses lam_min, which is configured for CPU/CUDA in this repo."
             if model_name in LAM_MIN_MODELS
             else None
         ),
@@ -848,6 +902,18 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
             float(measurement_cfg["memory_poll_interval_s"]) * 1000.0,
         )
 
+    # Visualisation setup
+    R_field: NDArray[Any] | None = None
+    lon_ticks: NDArray[Any] | None = None
+    if args.visualise:
+        R_field = get_field()
+        lon_ticks = np.linspace(-180, 180, 5)
+        logging.info(
+            "Combined acoustic-map visualisation enabled: png_dpi=%d, modes=%s",
+            args.png_dpi,
+            ", ".join(sorted(visualisation_modes)) if visualisation_modes else "none",
+        )
+
     with torch.no_grad(), logging_redirect_tqdm():
         n_done = 0
         for batch in tqdm(data_loader, ncols=100, desc="Processing", total=total_items):
@@ -1013,18 +1079,44 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                 else:
                     _, I_pred = result
 
+            I_pred_np: NDArray[Any] | None = None
+            if args.visualise or not runtime_only_benchmark:
+                I_pred_np = I_pred.cpu().detach().numpy()
+
+            if args.visualise:
+                if R_field is None or lon_ticks is None or I_pred_np is None:
+                    raise RuntimeError("Visualisation resources were not initialised.")
+                frame_paths, gif_path, mp4_path = render_combined_acoustic_maps(
+                    I_pred_np,
+                    output_path=output_path,
+                    file_id=str(file_id),
+                    frame_width_ms=float(inference_config["frame_width_ms"]),
+                    r_field=R_field,
+                    lon_ticks=lon_ticks,
+                    modes=visualisation_modes,
+                    png_dpi=args.png_dpi,
+                )
+                logging.info(
+                    "Saved %d combined acoustic-map PNG frame(s), GIF, and MP4 for %s to %s",
+                    len(frame_paths),
+                    file_id,
+                    gif_path.parent.resolve(),
+                )
+                logging.debug("Visualisation media for %s: %s, %s", file_id, gif_path, mp4_path)
+
             if not runtime_only_benchmark:
-                I_pred = I_pred.cpu().detach().numpy()
-                I_pred_sq = np.square(I_pred)  # (frames, bands, pixels)
-                I_pred = I_pred_sq.sum(axis=1)  # (frames, pixels)
+                if I_pred_np is None:
+                    I_pred_np = I_pred.cpu().detach().numpy()
+                I_pred_sq = np.square(I_pred_np)  # (frames, bands, pixels)
+                I_pred_frame_maps = I_pred_sq.sum(axis=1)  # (frames, pixels)
                 frame_predictions = cluster_intensity_maps(
-                    I_pred,
+                    I_pred_frame_maps,
                     inference_config,
                     band_maps=I_pred_sq,
                 )
 
                 output_filename = write_output_dcase_csv(
-                    I_pred,
+                    I_pred_frame_maps,
                     inference_config,
                     file_id,
                     timestamp,
