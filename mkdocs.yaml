@@ -61,6 +61,7 @@ nav:
           - Overview: workflows/scientific-benchmarking.md
           - Latency Methodology: workflows/benchmarking/latency.md
           - Peak-Memory Methodology: workflows/benchmarking/memory.md
+          - CMD Methodology: workflows/benchmarking/cmd.md
           - DoA Extraction Pipeline: workflows/benchmarking/doa-extraction.md
       - Upsampler Training: workflows/upsampler-training.md
       - End-to-End Training: workflows/end-to-end-training.md
