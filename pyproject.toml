@@ -1,6 +1,6 @@
 [project]
 name = "upsampler-lam-benchmarking"
-version = "1.0.0"
+version = "1.0.1"
 description = "Benchmark Implementation of Different Upsamplers for 32ch LAM."
 readme = "README.md"
 requires-python = "==3.13.3"
