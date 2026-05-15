@@ -69,3 +69,7 @@ S. Zhao and F. Ma, “A circular microphone array with virtual microphones based
 ## <a id="r17"></a>[R17] AINN implementation reference
 
 AINN repository. <https://github.com/sipeizhao/AINN>
+
+## <a id="r18"></a>[R18] CMD paper
+
+M. Herdin, N. Czink, H. Ozcelik, and E. Bonek, "Correlation Matrix Distance, a Meaningful Measure for Evaluation of Non-Stationary MIMO Channels," *2005 IEEE 61st Vehicular Technology Conference*, vol. 1, pp. 136–140, May 2005. <https://doi.org/10.1109/VETECS.2005.1543265>
