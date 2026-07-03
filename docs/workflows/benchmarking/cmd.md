@@ -1,7 +1,7 @@
 # Correlation Matrix Distance (CMD) Methodology
 
 The Correlation Matrix Distance (CMD) quantifies how similar two Cross-Spectral Matrices (CSMs) are.
-It was originally introduced for MIMO channel evaluation [R18][../references.md#r18] and is used here to measure how faithfully each pipeline stage preserves the spatial information encoded in the full-resolution CSM.
+It was originally introduced for MIMO channel evaluation [R18](../../references.md#r18) and is used here to measure how faithfully each pipeline stage preserves the spatial information encoded in the full-resolution CSM.
 
 ## Definition
 
