@@ -478,7 +478,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
     runtime-only benchmark mode is enabled. Optionally collects and logs
     performance metrics including latency, FLOPs, and memory usage.
 
-    Supported datasets: starss23
+    Supported datasets: STARSS23, STAIRS26, and LOCATA.
     Supported models: UpLAM, LAM, BicubicLAM, SRCNNLAM, VariableSRCNNLAM, IMDNLAM,
                       SAFMNLAM, GANLAM, AINNLAM
 
@@ -607,6 +607,27 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
         selected_file_preview = ", ".join(wav_path.stem for wav_path in selected_wavs[:5])
         data_loader = DataLoader(
             starss_dataset,
+            batch_size=inference_config["batch_size"],
+            num_workers=inference_config["num_workers"],
+            shuffle=False,
+        )
+    elif inference_config["data_set"] == "stairs26":
+        from data.stairs26_loader import Stairs26AudioDataset  # noqa: PLC0415
+
+        stairs_dataset = Stairs26AudioDataset(
+            audio_path=Path(dataset_config["data_audio_path"]),
+        )
+        original_dataset_size = len(stairs_dataset.wavs)
+        selected_wavs = _select_dataset_wavs(
+            stairs_dataset.wavs,
+            inference_config,
+            selection_generator,
+        )
+        stairs_dataset.wavs = selected_wavs
+        dataset_size = len(stairs_dataset)
+        selected_file_preview = ", ".join(wav_path.stem for wav_path in selected_wavs[:5])
+        data_loader = DataLoader(
+            stairs_dataset,
             batch_size=inference_config["batch_size"],
             num_workers=inference_config["num_workers"],
             shuffle=False,
@@ -1104,7 +1125,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
 
     # Save metrics if collected
     if collect_metrics and all_metrics:
-        if not runtime_only_benchmark:
+        if not runtime_only_benchmark and inference_config["data_set"] != "stairs26":
             gt_loader = _build_ground_truth_loader(
                 inference_config["data_set"],
                 dataset_config,
@@ -1142,6 +1163,8 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                     "seld_score": seld_score,
                 }
             )
+        elif not runtime_only_benchmark and inference_config["data_set"] == "stairs26":
+            logging.info("Skipping SELD evaluation: STAIRS26 uses acoustic-image JSON labels.")
 
         # Save metrics to JSON
         metrics_path = Path(output_path).joinpath(f"metrics_{timestamp}.json")

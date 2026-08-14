@@ -28,6 +28,7 @@ Notes:
 | --- | --- |
 | `locata` | 32 channels for `LAM`, 4 channels for the wrapper models after channel selection |
 | `starss23` | 4 channels |
+| `stairs26` | 32-channels |
 
 ## Typical Commands
 

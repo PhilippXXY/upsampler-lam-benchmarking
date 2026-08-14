@@ -72,6 +72,7 @@ nav:
   - Datasets:
       - LOCATA: datasets/locata.md
       - STARSS23: datasets/starss23.md
+      - STAIRS26: datasets/stairs26.md
       - AudibleLight: datasets/audiblelight.md
       - EigenScape: datasets/eigenscape.md
   - Models:
