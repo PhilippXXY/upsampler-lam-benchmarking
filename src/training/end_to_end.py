@@ -21,6 +21,7 @@ from lam_min.model.IMDNLAM import IMDNLAM
 from lam_min.model.SAFMNLAM import SAFMNLAM
 from lam_min.model.SRCNNLAM import SRCNNLAM
 from lam_min.model.UpLAM import UpLAM
+from lam_min.model.VariableSRCNNLAM import VariableSRCNNLAM
 from lam_min.training_loss import MSETVLoss
 from lam_min.util.utils import (
     load_ainn_lam_state,
@@ -47,6 +48,7 @@ SUPPORTED_END_TO_END_MODELS = (
     "SAFMNLAM",
     "GANLAM",
     "AINNLAM",
+    "VariableSRCNNLAM",
 )
 ORIGINAL_LAM_METHOD = "original_msetv"
 
@@ -67,11 +69,6 @@ class EndToEndModel(Protocol):
     upsampler: nn.Module
     lam: nn.Module
 
-    def forward_components(
-        self, S: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Return upsampled CSM, reconstructed CSM, and latent map."""
-
     def parameters(self, recurse: bool = True) -> Iterator[nn.Parameter]:
         """Return trainable parameters."""
 
@@ -79,7 +76,7 @@ class EndToEndModel(Protocol):
         """Switch the wrapper between train/eval mode."""
 
 
-def build_end_to_end_model(  # noqa: PLR0911
+def build_end_to_end_model(  # noqa: C901, PLR0911
     model_cfg: dict[str, Any],
     *,
     num_bands: int,
@@ -142,6 +139,22 @@ def build_end_to_end_model(  # noqa: PLR0911
                 feature_channels=int(model_cfg.get("feature_channels", 64)),
                 mapping_channels=int(model_cfg.get("mapping_channels", 32)),
                 loss_name=str(model_cfg.get("loss_name", "l1")),
+            ),
+        )
+    if model_name == "VariableSRCNNLAM":
+        return cast(
+            nn.Module,
+            VariableSRCNNLAM(
+                num_bands=num_bands,
+                out_channels=int(model_cfg.get("out_channels", 32)),
+                feature_channels=int(model_cfg.get("feature_channels", 64)),
+                mapping_channels=int(model_cfg.get("mapping_channels", 32)),
+                loss_name=str(model_cfg.get("loss_name", "l1")),
+                variable_input_channel_counts=tuple(
+                    int(count)
+                    for count in model_cfg.get("variable_input_channel_counts", [4, 8, 16, 24, 32])
+                ),
+                freeze_lam=False,
             ),
         )
     if model_name == "IMDNLAM":
@@ -297,7 +310,7 @@ def initialise_model(  # noqa: C901
             device,
             lam_checkpoint=lam_checkpoint,
         )
-    elif model_name == "SRCNNLAM":
+    elif model_name in {"SRCNNLAM", "VariableSRCNNLAM"}:
         load_srcnn_lam_state(
             model,
             upsampler_checkpoint,
@@ -414,6 +427,7 @@ def calibrate_aux_weight(  # noqa: PLR0913
     aux_weight: float,
     use_model_specific_aux_loss: bool,
     random_init_generator: torch.Generator | None = None,
+    observed_channel_indices: torch.Tensor | None = None,
 ) -> AuxWeightCalibration:
     """
     Calibrate the effective auxiliary weight from one random-init probe pass.
@@ -439,6 +453,8 @@ def calibrate_aux_weight(  # noqa: PLR0913
     random_init_generator : torch.Generator | None, optional
         Optional torch RNG state used to initialise the temporary calibration
         model without perturbing the global training RNG.
+    observed_channel_indices : torch.Tensor | None, optional
+        Canonical observed indices for a variable-channel probe.
 
     Returns
     -------
@@ -471,6 +487,7 @@ def calibrate_aux_weight(  # noqa: PLR0913
                     S_low=S_low_probe,
                     S_high=S_high_probe,
                     lam_loss=lam_loss,
+                    observed_channel_indices=observed_channel_indices,
                 )
             )
             aux_raw, _aux_stats = compute_auxiliary_loss(
@@ -478,6 +495,7 @@ def calibrate_aux_weight(  # noqa: PLR0913
                 S_pred=S_pred,
                 S_high=S_high_probe,
                 use_model_specific_aux_loss=use_model_specific_aux_loss,
+                observed_channel_indices=observed_channel_indices,
             )
 
     initial_lam_total = float(lam_total.detach().cpu().item())
@@ -512,6 +530,7 @@ def _run_lam_with_frozen_upsampler(
     model: EndToEndModel,
     *,
     S_low: torch.Tensor,
+    observed_channel_indices: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Skip autograd through the frozen upsampler branch.
@@ -524,6 +543,8 @@ def _run_lam_with_frozen_upsampler(
         if isinstance(model, UpLAM):
             x_rel, x_imag = model._prepare_cdbpn_input(S_low)
             S_pred = model.upsampler(x_rel, x_imag, collect_metrics=False)
+        elif observed_channel_indices is not None:
+            S_pred = model.upsampler(S_low, observed_channel_indices, collect_metrics=False)
         else:
             S_pred = model.upsampler(S_low, collect_metrics=False)
         S_pred = S_pred.to(dtype=model.lam.D.dtype)
@@ -547,6 +568,7 @@ def run_end_to_end_step(  # type: ignore[no-any-unimported]  # noqa: PLR0913
     optimiser: OptimiserInput | None = None,
     grad_clip_norm: float = 0.0,
     freeze_upsampler: bool = False,
+    observed_channel_indices: torch.Tensor | None = None,
 ) -> dict[str, float]:
     """
     Run a single end-to-end train or validation step.
@@ -575,6 +597,8 @@ def run_end_to_end_step(  # type: ignore[no-any-unimported]  # noqa: PLR0913
         Optimiser input for training mode. ``None`` means validation mode.
     grad_clip_norm : float, optional
         Maximum gradient norm. Non-positive values disable clipping.
+    observed_channel_indices : torch.Tensor | None, optional
+        Canonical observed indices for variable-channel models.
 
     Returns
     -------
@@ -600,7 +624,9 @@ def run_end_to_end_step(  # type: ignore[no-any-unimported]  # noqa: PLR0913
         optimiser.zero_grad(set_to_none=True)
 
     if freeze_upsampler:
-        S_pred, S_out, latent_x = _run_lam_with_frozen_upsampler(model, S_low=S_low)
+        S_pred, S_out, latent_x = _run_lam_with_frozen_upsampler(
+            model, S_low=S_low, observed_channel_indices=observed_channel_indices
+        )
         original_latent = torch.abs(latent_x) if latent_x.ndim == 1 else torch.abs(latent_x[0])
         lam_target = S_high.to(dtype=S_out.dtype)
         lam_total, lam_reconstruction, lam_tv = cast(
@@ -626,6 +652,7 @@ def run_end_to_end_step(  # type: ignore[no-any-unimported]  # noqa: PLR0913
             S_low=S_low,
             S_high=S_high,
             lam_loss=lam_loss,
+            observed_channel_indices=observed_channel_indices,
         )
 
     aux_raw = lam_total.new_zeros(())
@@ -636,6 +663,7 @@ def run_end_to_end_step(  # type: ignore[no-any-unimported]  # noqa: PLR0913
             S_pred=S_pred,
             S_high=S_high,
             use_model_specific_aux_loss=use_model_specific_aux_loss,
+            observed_channel_indices=observed_channel_indices,
         )
     applied_aux_weight = effective_aux_weight if aux_enabled else 0.0
     applied_aux_ratio = aux_baseline_ratio if aux_enabled else 0.0
@@ -683,6 +711,7 @@ def run_epoch(  # type: ignore[no-any-unimported]  # noqa: PLR0913
     grad_clip_norm: float = 0.0,
     log_every_files: int = 0,
     freeze_upsampler: bool = False,
+    epoch: int = 0,
 ) -> dict[str, float]:
     """
     Run one training or validation epoch for the end-to-end model.
@@ -728,12 +757,22 @@ def run_epoch(  # type: ignore[no-any-unimported]  # noqa: PLR0913
         model.upsampler.eval()
 
     loss_sums: dict[str, float] = {"loss_total": 0.0}
+    count_loss_sums: dict[int, float] = {}
+    count_chunks: dict[int, int] = {}
     chunk_count = 0
+
+    if callable(set_epoch := getattr(loader.batch_sampler, "set_epoch", None)):
+        set_epoch(epoch)
 
     iterator = tqdm(loader, ncols=100, desc="Train" if is_train else "Val")
     for file_index, sample in enumerate(iterator, start=1):
         S_low = sample["S_low"].to(device)
         S_high = sample["S_high"].to(device)
+        observed_indices = sample.get("observed_channel_indices")
+        if torch.is_tensor(observed_indices):
+            observed_indices = observed_indices.to(device)
+        input_count = sample.get("input_channel_count")
+        count = int(input_count) if torch.is_tensor(input_count) else None
         n_frames = int(S_low.shape[0])
 
         for start in range(0, n_frames, frame_batch_size):
@@ -753,10 +792,14 @@ def run_epoch(  # type: ignore[no-any-unimported]  # noqa: PLR0913
                 optimiser=optimiser,
                 grad_clip_norm=grad_clip_norm,
                 freeze_upsampler=freeze_upsampler,
+                observed_channel_indices=observed_indices,
             )
             for key, value in stats.items():
                 loss_sums[key] = loss_sums.get(key, 0.0) + float(value)
             chunk_count += 1
+            if count is not None:
+                count_loss_sums[count] = count_loss_sums.get(count, 0.0) + stats["loss_total"]
+                count_chunks[count] = count_chunks.get(count, 0) + 1
 
         if log_every_files > 0 and file_index % log_every_files == 0:
             logging.info(
@@ -769,5 +812,11 @@ def run_epoch(  # type: ignore[no-any-unimported]  # noqa: PLR0913
 
     denom = max(chunk_count, 1)
     out = {key: value / denom for key, value in loss_sums.items()}
+    out.update(
+        {
+            f"loss_{count}ch": total / count_chunks[count]
+            for count, total in sorted(count_loss_sums.items())
+        }
+    )
     out["num_chunks"] = float(chunk_count)
     return out

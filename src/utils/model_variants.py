@@ -35,6 +35,7 @@ FAMILY_LABELS: dict[str, str] = {
     "uplam": "CDBPN",
     "bicubiclam": "Bicubic",
     "srcnnlam": "SRCNN",
+    "srcnnlam_variable": "Variable SRCNN",
     "imdnlam": "IMDN",
     "safmnlam": "SAMFN",
     "ganlam": "GAN",
@@ -46,6 +47,7 @@ FAMILY_COLOURS: dict[str, str] = {
     "bicubiclam": "#898e96",
     "uplam": "#ad5f55",
     "srcnnlam": "#c59647",
+    "srcnnlam_variable": "#d08a32",
     "imdnlam": "#9d6387",
     "safmnlam": "#8a6a5a",
     "ganlam": "#5d82aa",
@@ -57,6 +59,7 @@ FAMILY_MODEL_NAMES: dict[str, str] = {
     "uplam": "UpLAM",
     "bicubiclam": "BicubicLAM",
     "srcnnlam": "SRCNNLAM",
+    "srcnnlam_variable": "VariableSRCNNLAM",
     "imdnlam": "IMDNLAM",
     "safmnlam": "SAFMNLAM",
     "ganlam": "GANLAM",
@@ -73,6 +76,14 @@ CHECKPOINT_SRCNN = "src/upsampler/srcnn/checkpoints/srcnn.pth"
 CHECKPOINT_SRCNN_E2E_AUXDIS = "src/lam_min/checkpoints/e2e/srcnnlam_e2e_auxdis.pth"
 CHECKPOINT_SRCNN_E2E_UPFROZ = "src/lam_min/checkpoints/e2e/srcnnlam_e2e_upfroz.pth"
 CHECKPOINT_SRCNN_E2E_AUXEN = "src/lam_min/checkpoints/e2e/srcnnlam_e2e_auxen.pth"
+CHECKPOINT_VARIABLE_SRCNN = "src/upsampler/srcnn/checkpoints/srcnn_variable.pth"
+CHECKPOINT_VARIABLE_SRCNN_E2E_AUXDIS = (
+    "src/lam_min/checkpoints/e2e/srcnnlam_variable_e2e_auxdis.pth"
+)
+CHECKPOINT_VARIABLE_SRCNN_E2E_UPFROZ = (
+    "src/lam_min/checkpoints/e2e/srcnnlam_variable_e2e_upfroz.pth"
+)
+CHECKPOINT_VARIABLE_SRCNN_E2E_AUXEN = "src/lam_min/checkpoints/e2e/srcnnlam_variable_e2e_auxen.pth"
 CHECKPOINT_IMDN = "src/upsampler/imdn/checkpoints/imdn.pth"
 CHECKPOINT_IMDN_E2E_AUXDIS = "src/lam_min/checkpoints/e2e/imdnlam_e2e_auxdis.pth"
 CHECKPOINT_IMDN_E2E_UPFROZ = "src/lam_min/checkpoints/e2e/imdnlam_e2e_upfroz.pth"
@@ -307,6 +318,46 @@ def _build_variant_specs() -> tuple[RetainedVariantSpec, ...]:
             colour=FAMILY_COLOURS["srcnnlam"],
         ),
         RetainedVariantSpec(
+            variant_id="srcnnlam_variable_dist",
+            family_id="srcnnlam_variable",
+            family_label=FAMILY_LABELS["srcnnlam_variable"],
+            variant_kind=VARIANT_KIND_DIST,
+            infer_model_name=FAMILY_MODEL_NAMES["srcnnlam_variable"],
+            checkpoint=CHECKPOINT_VARIABLE_SRCNN,
+            lam_checkpoint=CHECKPOINT_LAM,
+            colour=FAMILY_COLOURS["srcnnlam_variable"],
+        ),
+        RetainedVariantSpec(
+            variant_id="srcnnlam_variable_e2e_auxdis",
+            family_id="srcnnlam_variable",
+            family_label=FAMILY_LABELS["srcnnlam_variable"],
+            variant_kind=VARIANT_KIND_E2E_AUXDIS,
+            infer_model_name=FAMILY_MODEL_NAMES["srcnnlam_variable"],
+            checkpoint=CHECKPOINT_VARIABLE_SRCNN_E2E_AUXDIS,
+            lam_checkpoint=None,
+            colour=FAMILY_COLOURS["srcnnlam_variable"],
+        ),
+        RetainedVariantSpec(
+            variant_id="srcnnlam_variable_e2e_upfroz",
+            family_id="srcnnlam_variable",
+            family_label=FAMILY_LABELS["srcnnlam_variable"],
+            variant_kind=VARIANT_KIND_E2E_UPFROZ,
+            infer_model_name=FAMILY_MODEL_NAMES["srcnnlam_variable"],
+            checkpoint=CHECKPOINT_VARIABLE_SRCNN_E2E_UPFROZ,
+            lam_checkpoint=None,
+            colour=FAMILY_COLOURS["srcnnlam_variable"],
+        ),
+        RetainedVariantSpec(
+            variant_id="srcnnlam_variable_e2e_auxen",
+            family_id="srcnnlam_variable",
+            family_label=FAMILY_LABELS["srcnnlam_variable"],
+            variant_kind=VARIANT_KIND_E2E_AUXEN,
+            infer_model_name=FAMILY_MODEL_NAMES["srcnnlam_variable"],
+            checkpoint=CHECKPOINT_VARIABLE_SRCNN_E2E_AUXEN,
+            lam_checkpoint=None,
+            colour=FAMILY_COLOURS["srcnnlam_variable"],
+        ),
+        RetainedVariantSpec(
             variant_id="imdnlam_dist",
             family_id="imdnlam",
             family_label=FAMILY_LABELS["imdnlam"],
@@ -491,6 +542,11 @@ FAMILY_TO_VARIANT_IDS: dict[str, tuple[str, ...]] = {
         "srcnnlam_dist",
         "srcnnlam_e2e_auxdis",
         "srcnnlam_e2e_upfroz",
+    ),
+    "srcnnlam_variable": (
+        "srcnnlam_variable_dist",
+        "srcnnlam_variable_e2e_auxdis",
+        "srcnnlam_variable_e2e_upfroz",
     ),
     "imdnlam": (
         "imdnlam_dist",

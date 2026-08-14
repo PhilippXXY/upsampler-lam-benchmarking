@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from torch.utils.data import ConcatDataset, DataLoader
+from torch.utils.data import ConcatDataset
 
+from data.variable_channels import CANONICAL_CHANNELS
 from training.end_to_end import (
     build_end_to_end_model,
     build_lam_loss,
@@ -24,7 +25,6 @@ from utils.model_variants import canonical_e2e_checkpoint_prefix, resolve_e2e_va
 from utils.training_utils import (
     build_dataset_list,
     build_train_loader,
-    collate_single_item,
     configure_torch_multiprocessing,
     format_compact_loss_series,
     load_conf,
@@ -47,14 +47,16 @@ def _clone_torch_generator(generator: torch.Generator) -> torch.Generator:
     return cloned
 
 
-def _load_probe_chunk(
+def _load_probe_chunk(  # noqa: PLR0913
     *,
     train_datasets: list[Any],
     device: torch.device,
     sampling: str,
     frame_batch_size: int,
     generator: torch.Generator,
-) -> tuple[torch.Tensor, torch.Tensor]:
+    variable_channel_counts: tuple[int, ...] | None = None,
+    seed: int = 42,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """
     Load one probe chunk for auxiliary-weight calibration without touching the real loader.
 
@@ -70,11 +72,15 @@ def _load_probe_chunk(
         The number of frames to load in the probe chunk.
     generator: torch.Generator
         The torch generator to use for deterministic sampling of the probe chunk.
+    variable_channel_counts : tuple[int, ...] | None, optional
+        Variable microphone counts for the probe.
+    seed : int, optional
+        General training seed, also used for variable subsets.
 
     Returns
     -------
-    tuple[torch.Tensor, torch.Tensor]
-        The low and high channel tensors from the probe chunk, loaded onto the specified device.
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]
+        Probe CSMs and optional observed microphone indices.
     """
     probe_loader = build_train_loader(
         datasets=train_datasets,
@@ -82,8 +88,15 @@ def _load_probe_chunk(
         device=device,
         sampling=sampling,
         generator=generator,
+        variable_channel_counts=variable_channel_counts,
+        seed=seed,
     )
-    probe_sample = next(iter(probe_loader))
+    probe_sample = next(
+        sample
+        for sample in probe_loader
+        if variable_channel_counts is None
+        or int(sample["input_channel_count"]) < CANONICAL_CHANNELS
+    )
     S_low = probe_sample["S_low"]
     S_high = probe_sample["S_high"]
     if int(S_low.shape[0]) <= 0:
@@ -92,7 +105,12 @@ def _load_probe_chunk(
         )
 
     end = min(frame_batch_size, int(S_low.shape[0]))
-    return S_low[:end].to(device), S_high[:end].to(device)
+    observed_indices = probe_sample.get("observed_channel_indices")
+    return (
+        S_low[:end].to(device),
+        S_high[:end].to(device),
+        observed_indices.to(device) if torch.is_tensor(observed_indices) else None,
+    )
 
 
 def main() -> None:  # noqa: C901, PLR0912, PLR0915
@@ -127,7 +145,8 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
         timestamp=timestamp,
     )
 
-    train_generator = seed_everything(int(training_cfg.get("seed", 42)))
+    training_seed = int(training_cfg.get("seed", 42))
+    train_generator = seed_everything(training_seed)
 
     requested_device = args.device if args.device else str(training_cfg.get("device", "cpu"))
     device = resolve_training_device(
@@ -143,6 +162,23 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
     model_cfg = dict(model_cfg)
     model_cfg["low_channel_indices"] = config["data"].get("low_channel_indices", [5, 9, 21, 25])
     model = build_end_to_end_model(model_cfg=model_cfg, num_bands=num_bands).to(device)
+    variable_counts = (
+        tuple(
+            int(count)
+            for count in model_cfg.get("variable_input_channel_counts", [4, 8, 16, 24, 32])
+        )
+        if model_name == "VariableSRCNNLAM"
+        else None
+    )
+    if variable_counts is not None:
+        eigenscape_cfg = config["data"].get("eigenscape", {})
+        if (
+            eigenscape_cfg.get("expected_channels", CANONICAL_CHANNELS) != CANONICAL_CHANNELS
+            or int(eigenscape_cfg.get("target_high_channels", CANONICAL_CHANNELS))
+            != CANONICAL_CHANNELS
+            or bool(eigenscape_cfg.get("allow_channel_fallback", False))
+        ):
+            raise ValueError("VariableSRCNNLAM requires strict 32-channel EigenScape sources")
 
     resume_checkpoint = (
         args.resume_checkpoint.strip()
@@ -278,12 +314,14 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
         if aux_calibration_enabled and aux_calibration_meta["loss_aux_weight"] is None:
             probe_generator = _clone_torch_generator(train_generator)
             calibration_generator = _clone_torch_generator(train_generator)
-            probe_low, probe_high = _load_probe_chunk(
+            probe_low, probe_high, probe_indices = _load_probe_chunk(
                 train_datasets=train_datasets,
                 device=device,
                 sampling=str(stage["train_sampling"]),
                 frame_batch_size=frame_batch_size,
                 generator=probe_generator,
+                variable_channel_counts=variable_counts,
+                seed=training_seed,
             )
             aux_calibration = calibrate_aux_weight(
                 model_cfg=model_cfg,
@@ -295,6 +333,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                 aux_weight=aux_weight,
                 use_model_specific_aux_loss=use_model_specific_aux_loss,
                 random_init_generator=calibration_generator,
+                observed_channel_indices=probe_indices,
             )
 
             effective_aux_weight = aux_calibration.effective_aux_weight
@@ -323,17 +362,17 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
             device=device,
             sampling=str(stage["train_sampling"]),
             generator=train_generator,
+            variable_channel_counts=variable_counts,
+            seed=training_seed,
         )
-        val_loader = DataLoader(
-            val_dataset,
-            batch_size=1,
-            shuffle=False,
-            collate_fn=collate_single_item,
+        val_loader = build_train_loader(
+            datasets=val_datasets,
             num_workers=num_workers,
-            pin_memory=(device.type == "cuda"),
-            **(
-                {"prefetch_factor": 1, "persistent_workers": True} if num_workers > 0 else {}  # type: ignore[arg-type]
-            ),
+            device=device,
+            sampling="proportional",
+            variable_channel_counts=variable_counts,
+            seed=training_seed,
+            shuffle=False,
         )
 
         patience = int(stage["early_stopping_patience"])
@@ -360,6 +399,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                 grad_clip_norm=grad_clip_norm,
                 log_every_files=log_every_files,
                 freeze_upsampler=freeze_upsampler,
+                epoch=epoch,
             )
 
             with torch.no_grad():
@@ -378,6 +418,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                     grad_clip_norm=0.0,
                     log_every_files=0,
                     freeze_upsampler=freeze_upsampler,
+                    epoch=epoch,
                 )
 
             epoch_row = {

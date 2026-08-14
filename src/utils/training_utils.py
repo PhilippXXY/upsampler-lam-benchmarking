@@ -15,6 +15,7 @@ from torch.utils.data import ConcatDataset, DataLoader, Dataset, WeightedRandomS
 
 from data.audiblelight_loader import AudibleLightCSMPairDataset
 from data.eigenscape_loader import EigenscapeCSMPairDataset
+from data.variable_channels import VariableChannelBatchSampler, VariableChannelCSMDataset
 from utils.utils import resolve_requested_device
 
 
@@ -255,12 +256,15 @@ def configure_torch_multiprocessing(num_workers: int) -> str | None:
     return "file_system"
 
 
-def build_train_loader(
+def build_train_loader(  # noqa: PLR0913
     datasets: list[Dataset[dict[str, Any]]],
     num_workers: int,
     device: torch.device,
     sampling: str,
     generator: torch.Generator | None = None,
+    variable_channel_counts: tuple[int, ...] | None = None,
+    seed: int = 42,
+    shuffle: bool = True,
 ) -> DataLoader[dict[str, Any]]:
     """
     Build the training DataLoader.
@@ -277,6 +281,12 @@ def build_train_loader(
         Sampling mode, either ``proportional`` or ``balanced``.
     generator : torch.Generator | None, optional
         Optional torch RNG used for deterministic shuffling and weighted sampling.
+    variable_channel_counts : tuple[int, ...] | None, optional
+        Enable sparse variable-channel CSM sampling at these microphone counts.
+    seed : int, optional
+        General training seed, also used for variable subsets.
+    shuffle : bool, optional
+        Whether to shuffle or redraw samples.
 
     Returns
     -------
@@ -299,19 +309,45 @@ def build_train_loader(
         loader_kwargs["prefetch_factor"] = 1
         loader_kwargs["persistent_workers"] = True
 
+    sampling_mode = sampling.strip().lower()
+    if variable_channel_counts is not None:
+        source: Dataset[dict[str, Any]] = (
+            datasets[0] if len(datasets) == 1 else ConcatDataset(datasets)
+        )
+        variable_weights = None
+        if shuffle and len(datasets) > 1 and sampling_mode == "balanced":
+            variable_weights = [
+                1.0 / max(_dataset_len(dataset), 1)
+                for dataset in datasets
+                for _ in range(_dataset_len(dataset))
+            ]
+        variable_dataset = VariableChannelCSMDataset(source, variable_channel_counts)
+        batch_sampler = VariableChannelBatchSampler(
+            len(variable_dataset),
+            channel_counts=variable_channel_counts,
+            shuffle=shuffle,
+            seed=seed,
+            sample_weights=variable_weights,
+        )
+        return DataLoader(
+            variable_dataset,
+            batch_sampler=batch_sampler,
+            collate_fn=collate_single_item,
+            **loader_kwargs,
+        )
+
     if len(datasets) == 1:
         return DataLoader(
             datasets[0],
             batch_size=1,
-            shuffle=True,
+            shuffle=shuffle,
             collate_fn=collate_single_item,
             generator=generator,
             **loader_kwargs,
         )
 
     concat: ConcatDataset[dict[str, Any]] = ConcatDataset(datasets)
-    sampling_mode = sampling.strip().lower()
-    if sampling_mode == "balanced":
+    if shuffle and sampling_mode == "balanced":
         weights: list[float] = []
         for dataset in datasets:
             dataset_len = _dataset_len(dataset)
@@ -337,7 +373,7 @@ def build_train_loader(
     return DataLoader(
         concat,
         batch_size=1,
-        shuffle=True,
+        shuffle=shuffle,
         collate_fn=collate_single_item,
         generator=generator,
         **loader_kwargs,
@@ -507,7 +543,7 @@ def sanitise_name(name: str) -> str:
     str
         Sanitised name.
     """
-    import re
+    import re  # noqa: PLC0415
 
     return re.sub(r"[^A-Za-z0-9_-]+", "_", name)
 

@@ -68,11 +68,12 @@ loss:
 
 # --- Wrapper Architecture & Model Hyperparameters ---
 model:
-  name: "BicubicLAM"              # Options: "UpLAM", "BicubicLAM", "SRCNNLAM", "IMDNLAM", "SAFMNLAM", "GANLAM", "AINNLAM"
+  name: "BicubicLAM"              # Options: "UpLAM", "BicubicLAM", "SRCNNLAM", "IMDNLAM", "SAFMNLAM", "GANLAM", "AINNLAM", "VariableSRCNNLAM"
   in_channels: 4
   out_channels: 32
   feature_channels: 64
   mapping_channels: 32
+  variable_input_channel_counts: [4, 8, 16, 24, 32]
   n_blocks: 8
   n_residual_blocks: 8
   ffn_scale: 2.0

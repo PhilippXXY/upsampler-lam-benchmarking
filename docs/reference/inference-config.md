@@ -25,6 +25,7 @@ For measurement definitions, see [Scientific Benchmarking](../workflows/scientif
 | --- | --- | --- | --- |
 | `data_set` | string | `locata` | Supported values: `locata`, `starss23` |
 | `locata_low_channel_indices` | list[int] | `[5, 9, 21, 25]` | Zero-based Eigenmike indices used for the 4-channel LOCATA path. AINNLAM also uses them to select the low-resolution microphone geometry at inference time |
+| `variable_input_channel_counts` | list[int] | `[4, 8, 16, 24, 32]` | Trained microphone counts accepted by variable-SRCNN checkpoints |
 | `locata_tasks` | list[string] or omitted | `["task1", "task2", "task3", "task4"]` | Optional LOCATA task subset; when omitted, task1-task4 are used |
 
 ### Audio and visibility frontend

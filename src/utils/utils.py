@@ -4,7 +4,7 @@ import csv
 import logging
 import math
 import statistics
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +13,7 @@ import torch
 from numpy.typing import NDArray
 from scipy.signal import resample_poly
 
+from data.variable_channels import validate_channel_indices
 from lam_min.trainer.kmeans import cluster_sequence, get_kmeans_clusters
 from lam_min.util.utils import convert_polar_to_cartesian, get_field
 from utils.benchmarking import apply_benchmark_audio_length
@@ -184,6 +185,7 @@ def prepare_audio_for_inference(
     audio: NDArray[np.float32],
     sample_rate: int,
     inference_config: dict[str, Any],
+    input_channel_indices: Sequence[int] | None = None,
 ) -> tuple[NDArray[np.float32], NDArray[np.float32], dict[str, Any]]:
     """
     Resample and select channels for inference.
@@ -202,6 +204,8 @@ def prepare_audio_for_inference(
     inference_config : dict[str, Any]
         Inference configuration containing the model name, target sampling rate,
         benchmark duration settings, and optional low-channel indices.
+    input_channel_indices : Sequence[int] | None, optional
+        Canonical Eigenmike indices supplied through the inference CLI.
 
     Returns
     -------
@@ -231,11 +235,33 @@ def prepare_audio_for_inference(
     )
     full_resolution_audio = np.asarray(prepared_audio, dtype=np.float32, copy=False)
 
-    expected_channels = locata_model_input_channels(model_name)
+    expected_channels = (
+        0 if model_name == "VariableSRCNNLAM" else locata_model_input_channels(model_name)
+    )
     selected_channel_indices: tuple[int, ...] | None = None
 
+    if model_name == "VariableSRCNNLAM":
+        if input_channel_indices is None:
+            raise ValueError("VariableSRCNNLAM requires --input-channel-indices")
+        raw_indices = tuple(int(index) for index in input_channel_indices)
+        trained_counts = tuple(
+            int(count)
+            for count in inference_config.get("variable_input_channel_counts", (4, 8, 16, 24, 32))
+        )
+        configured_indices = validate_channel_indices(raw_indices, trained_counts)
+        selected_channel_indices = tuple(int(index) for index in configured_indices)
+        expected_channels = len(selected_channel_indices)
+        if num_input_channels == LOCATA_RAW_NUM_CHANNELS:
+            prepared_audio = prepared_audio[:, list(selected_channel_indices)]
+        elif num_input_channels != expected_channels:
+            raise ValueError(
+                f"VariableSRCNNLAM received {num_input_channels} audio channels but "
+                f"--input-channel-indices contains {expected_channels} entries"
+            )
+
     if (
-        num_input_channels == LOCATA_RAW_NUM_CHANNELS
+        model_name != "VariableSRCNNLAM"
+        and num_input_channels == LOCATA_RAW_NUM_CHANNELS
         and expected_channels == LOCATA_LOW_CHANNEL_COUNT
     ):
         configured = tuple(

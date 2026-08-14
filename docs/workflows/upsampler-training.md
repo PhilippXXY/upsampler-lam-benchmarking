@@ -23,6 +23,7 @@ uv run python src/train_upsamplers.py --config config/train_upsamplers.yaml --de
 | --- | --- |
 | `BicubicUpsampler` | `upsampler.bicubic.model.BicubicUpsampler` |
 | `SRCNNUpsampler` | `upsampler.srcnn.model.SRCNNUpsampler` |
+| `VariableSRCNNUpsampler` | `upsampler.srcnn.variable.VariableSRCNNUpsampler` |
 | `IMDNUpsampler` | `upsampler.imdn.model.IMDNUpsampler` |
 | `SAFMNUpsampler` | `upsampler.safmn.model.SAFMNUpsampler` |
 | `GANUpsampler` | `upsampler.gan.model.GANUpsampler` |

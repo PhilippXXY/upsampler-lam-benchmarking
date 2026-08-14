@@ -18,6 +18,7 @@ inference:
   # --- Dataset & Channel Selection ---
   data_set: "locata"
   locata_low_channel_indices: [5, 9, 21, 25]
+  variable_input_channel_counts: [4, 8, 16, 24, 32]
   # locata_tasks: ["task1", "task2", "task3", "task4"]
 
   # --- Signal Processing Parameters ---

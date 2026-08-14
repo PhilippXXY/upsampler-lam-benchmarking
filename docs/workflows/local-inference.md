@@ -14,6 +14,7 @@ uv run python src/infer.py --config config/inference_config.yaml --device cpu
 | --- | --- | --- |
 | `--config` | `config/inference_config.yaml` | Path to the YAML file that defines the run |
 | `--device` | `cpu` | Requested runtime device: `cpu`, `mps`, or `cuda` |
+| `--input-channel-indices` | omitted | Space-separated canonical Eigenmike indices required by variable-SRCNN variants |
 
 Notes:
 

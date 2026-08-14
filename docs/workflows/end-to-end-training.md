@@ -24,6 +24,7 @@ uv run python src/train_end_to_end.py --config config/train_end_to_end.yaml --de
 | `UpLAM` | `lam_min.model.UpLAM.UpLAM` |
 | `BicubicLAM` | `lam_min.model.BicubicLAM.BicubicLAM` |
 | `SRCNNLAM` | `lam_min.model.SRCNNLAM.SRCNNLAM` |
+| `VariableSRCNNLAM` | `lam_min.model.VariableSRCNNLAM.VariableSRCNNLAM` |
 | `IMDNLAM` | `lam_min.model.IMDNLAM.IMDNLAM` |
 | `SAFMNLAM` | `lam_min.model.SAFMNLAM.SAFMNLAM` |
 | `GANLAM` | `lam_min.model.GANLAM.GANLAM` |

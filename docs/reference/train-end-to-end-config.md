@@ -111,6 +111,7 @@ e2e_upfroz: loss_total = loss_lam_total
 | `out_channels` | int | `32` | High-resolution microphone count |
 | `feature_channels` | int | `64` | Used by SRCNN, IMDN, and SAFMN. GAN uses `128` in the inference path |
 | `mapping_channels` | int | `32` | Used by SRCNN and IMDN |
+| `variable_input_channel_counts` | list[int] | `[4, 8, 16, 24, 32]` | Counts accepted by `VariableSRCNNLAM` |
 | `n_blocks` | int | `8` | Used by SAFMN and as a residual-block default for GAN configs |
 | `n_residual_blocks` | int | `8` | Used by GAN wrappers |
 | `ffn_scale` | float | `2.0` | Used by SAFMN |

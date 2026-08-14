@@ -369,6 +369,7 @@ def _component_forward_functions(
     model_name: str,
     input_tensor: torch.Tensor,
     device: torch.device,
+    observed_channel_indices: torch.Tensor | None = None,
 ) -> tuple[Callable[[], Any], Callable[[], Any] | None, Callable[[], Any] | None]:
     """
     Build callables for full, upsampler-only, and LAM-only steady-state measurement.
@@ -386,6 +387,8 @@ def _component_forward_functions(
         A representative input tensor to be used for the forward passes during measurement.
     device : torch.device
         The torch device on which the forward functions will be executed.
+    observed_channel_indices : torch.Tensor | None, optional
+        Canonical observed indices for variable-channel models.
 
     Returns
     -------
@@ -400,7 +403,11 @@ def _component_forward_functions(
     measurement_input = input_tensor.contiguous()
 
     def _full_forward() -> Any:
-        return model(measurement_input, collect_metrics=False)
+        return (
+            model(measurement_input, observed_channel_indices, collect_metrics=False)
+            if observed_channel_indices is not None
+            else model(measurement_input, collect_metrics=False)
+        )
 
     if model_name == "LAM":
         return _full_forward, None, _full_forward
@@ -417,7 +424,14 @@ def _component_forward_functions(
     elif hasattr(model, "upsampler"):
 
         def _upsampler_forward() -> Any:
-            return model.upsampler(measurement_input, collect_metrics=False).to(  # type: ignore[operator]
+            output = (
+                model.upsampler(  # type: ignore[operator]
+                    measurement_input, observed_channel_indices, collect_metrics=False
+                )
+                if observed_channel_indices is not None
+                else model.upsampler(measurement_input, collect_metrics=False)  # type: ignore[operator]
+            )
+            return output.to(
                 dtype=model.lam.D.dtype  # type: ignore[union-attr]
             )
 
@@ -442,6 +456,7 @@ def apply_steady_state_runtime_metrics(  # noqa: C901, PLR0912, PLR0913, PLR0915
     input_tensor: torch.Tensor,
     device: torch.device,
     inference_config: dict[str, Any],
+    observed_channel_indices: torch.Tensor | None = None,
 ) -> None:
     """
     Override single-pass timing and memory fields with steady-state measurements.
@@ -467,6 +482,8 @@ def apply_steady_state_runtime_metrics(  # noqa: C901, PLR0912, PLR0913, PLR0915
         - "memory_measurement_runs": Number of runs to measure memory (default: 0).
         - "memory_poll_interval_ms": Polling interval in milliseconds for memory measurement
         (default: 1.0 ms).
+    observed_channel_indices : torch.Tensor | None, optional
+        Canonical observed indices for variable-channel models.
     """
     measurement_cfg = _runtime_measurement_config(inference_config)
     latency_runs = int(measurement_cfg["latency_measurement_runs"])
@@ -481,6 +498,7 @@ def apply_steady_state_runtime_metrics(  # noqa: C901, PLR0912, PLR0913, PLR0915
         model_name=model_name,
         input_tensor=input_tensor,
         device=device,
+        observed_channel_indices=observed_channel_indices,
     )
 
     metrics["runtime_measurement_method"] = "steady_state_repeated_forward"

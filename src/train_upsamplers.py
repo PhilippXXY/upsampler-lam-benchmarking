@@ -17,17 +17,17 @@ import torch
 from torch.utils.data import ConcatDataset, DataLoader
 from tqdm import tqdm
 
+from data.variable_channels import CANONICAL_CHANNELS
 from upsampler import TrainableUpsampler
 from upsampler.ainn import AINNUpsampler
 from upsampler.bicubic import BicubicUpsampler
 from upsampler.gan import GANUpsampler
 from upsampler.imdn import IMDNUpsampler
 from upsampler.safmn import SAFMNUpsampler
-from upsampler.srcnn import SRCNNUpsampler
+from upsampler.srcnn import SRCNNUpsampler, VariableSRCNNUpsampler
 from utils.training_utils import (
     build_dataset_list,
     build_train_loader,
-    collate_single_item,
     configure_torch_multiprocessing,
     format_compact_loss_series,
     load_conf,
@@ -46,7 +46,9 @@ from utils.utils import seed_everything
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
 
-def build_model(model_cfg: dict[str, Any]) -> TrainableUpsampler:  # type: ignore[no-any-unimported]
+def build_model(  # type: ignore[no-any-unimported]  # noqa: PLR0911
+    model_cfg: dict[str, Any],
+) -> TrainableUpsampler:
     """
     Instantiate a trainable upsampler.
 
@@ -80,6 +82,17 @@ def build_model(model_cfg: dict[str, Any]) -> TrainableUpsampler:  # type: ignor
             feature_channels=int(model_cfg.get("feature_channels", 64)),
             mapping_channels=int(model_cfg.get("mapping_channels", 32)),
             loss_name=str(model_cfg.get("loss_name", "l1")),
+        )
+    elif model_name == "VariableSRCNNUpsampler":
+        return VariableSRCNNUpsampler(
+            out_channels=int(model_cfg.get("out_channels", 32)),
+            feature_channels=int(model_cfg.get("feature_channels", 64)),
+            mapping_channels=int(model_cfg.get("mapping_channels", 32)),
+            loss_name=str(model_cfg.get("loss_name", "l1")),
+            variable_input_channel_counts=tuple(
+                int(count)
+                for count in model_cfg.get("variable_input_channel_counts", [4, 8, 16, 24, 32])
+            ),
         )
     elif model_name == "IMDNUpsampler":
         return IMDNUpsampler(
@@ -131,7 +144,7 @@ def build_model(model_cfg: dict[str, Any]) -> TrainableUpsampler:  # type: ignor
     raise ValueError(f"Unsupported model '{model_name}'.")
 
 
-def run_epoch(  # type: ignore[no-any-unimported]  # noqa: PLR0913
+def run_epoch(  # type: ignore[no-any-unimported]  # noqa: C901, PLR0912, PLR0913
     model: TrainableUpsampler,
     loader: DataLoader[dict[str, Any]],
     device: torch.device,
@@ -139,6 +152,7 @@ def run_epoch(  # type: ignore[no-any-unimported]  # noqa: PLR0913
     optimiser: torch.optim.Optimizer | dict[str, torch.optim.Optimizer] | None = None,
     grad_clip_norm: float = 0.0,
     log_every_files: int = 0,
+    epoch: int = 0,
 ) -> dict[str, float]:
     """
     Run one training or validation epoch.
@@ -165,6 +179,8 @@ def run_epoch(  # type: ignore[no-any-unimported]  # noqa: PLR0913
     log_every_files : int, optional
         If greater than 0, log average loss every N files (default: 0, meaning no intermediate
         logging).
+    epoch : int, optional
+        Epoch used by variable-channel subset sampling.
 
     Returns
     -------
@@ -176,13 +192,23 @@ def run_epoch(  # type: ignore[no-any-unimported]  # noqa: PLR0913
     model.train(is_train)
 
     loss_sums: dict[str, float] = {"loss_total": 0.0}
+    count_loss_sums: dict[int, float] = {}
+    count_chunks: dict[int, int] = {}
     chunk_count = 0
+
+    if callable(set_epoch := getattr(loader.batch_sampler, "set_epoch", None)):
+        set_epoch(epoch)
 
     iterator = tqdm(loader, ncols=100, desc="Train" if is_train else "Val")
     # We process each file (batch) and then split into frame batches for the model steps.
     for file_idx, sample in enumerate(iterator, start=1):
         S_low = sample["S_low"].to(device)
         S_high = sample["S_high"].to(device)
+        observed_indices = sample.get("observed_channel_indices")
+        if torch.is_tensor(observed_indices):
+            observed_indices = observed_indices.to(device)
+        input_count = sample.get("input_channel_count")
+        count = int(input_count) if torch.is_tensor(input_count) else None
         n_frames = int(S_low.shape[0])
 
         for start in range(0, n_frames, frame_batch_size):
@@ -191,7 +217,22 @@ def run_epoch(  # type: ignore[no-any-unimported]  # noqa: PLR0913
             y = S_high[start:end]
 
             if optimiser is not None:
-                stats = model.training_step(x, y, optimiser, grad_clip_norm)
+                if observed_indices is not None:
+                    if not isinstance(model, VariableSRCNNUpsampler):
+                        raise TypeError("observed indices require VariableSRCNNUpsampler")
+                    stats = model.training_step(
+                        x,
+                        y,
+                        optimiser,
+                        grad_clip_norm,
+                        observed_channel_indices=observed_indices,
+                    )
+                else:
+                    stats = model.training_step(x, y, optimiser, grad_clip_norm)
+            elif observed_indices is not None:
+                if not isinstance(model, VariableSRCNNUpsampler):
+                    raise TypeError("observed indices require VariableSRCNNUpsampler")
+                stats = model.validation_step(x, y, observed_channel_indices=observed_indices)
             else:
                 stats = model.validation_step(x, y)
 
@@ -199,6 +240,9 @@ def run_epoch(  # type: ignore[no-any-unimported]  # noqa: PLR0913
             for key, value in stats.items():
                 loss_sums[key] = loss_sums.get(key, 0.0) + float(value)
             chunk_count += 1
+            if count is not None:
+                count_loss_sums[count] = count_loss_sums.get(count, 0.0) + stats["loss_total"]
+                count_chunks[count] = count_chunks.get(count, 0) + 1
 
         # Log intermediate average loss every N files if requested.
         if log_every_files > 0 and file_idx % log_every_files == 0:
@@ -213,6 +257,12 @@ def run_epoch(  # type: ignore[no-any-unimported]  # noqa: PLR0913
     # Final average loss for the epoch.
     denom = max(chunk_count, 1)
     out = {key: value / denom for key, value in loss_sums.items()}
+    out.update(
+        {
+            f"loss_{count}ch": total / count_chunks[count]
+            for count, total in sorted(count_loss_sums.items())
+        }
+    )
     out["num_chunks"] = float(chunk_count)
     return out
 
@@ -249,7 +299,8 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
         timestamp=timestamp,
     )
 
-    train_generator = seed_everything(int(training_cfg.get("seed", 42)))
+    training_seed = int(training_cfg.get("seed", 42))
+    train_generator = seed_everything(training_seed)
 
     requested_device = args.device if args.device else str(training_cfg.get("device", "cpu"))
     device = resolve_training_device(requested_device)
@@ -262,6 +313,23 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
     model_cfg = dict(model_cfg)
     model_cfg["low_channel_indices"] = config["data"].get("low_channel_indices", [5, 9, 21, 25])
     model = build_model(model_cfg).to(device)
+    variable_counts = (
+        tuple(
+            int(count)
+            for count in model_cfg.get("variable_input_channel_counts", [4, 8, 16, 24, 32])
+        )
+        if model_cfg["name"] == "VariableSRCNNUpsampler"
+        else None
+    )
+    if variable_counts is not None:
+        eigenscape_cfg = config["data"].get("eigenscape", {})
+        if (
+            eigenscape_cfg.get("expected_channels", CANONICAL_CHANNELS) != CANONICAL_CHANNELS
+            or int(eigenscape_cfg.get("target_high_channels", CANONICAL_CHANNELS))
+            != CANONICAL_CHANNELS
+            or bool(eigenscape_cfg.get("allow_channel_fallback", False))
+        ):
+            raise ValueError("VariableSRCNNUpsampler requires strict 32-channel EigenScape sources")
 
     resume_checkpoint = (
         args.resume_checkpoint.strip()
@@ -377,17 +445,17 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
             device=device,
             sampling=str(stage["train_sampling"]),
             generator=train_generator,
+            variable_channel_counts=variable_counts,
+            seed=training_seed,
         )
-        val_loader = DataLoader(
-            val_dataset,
-            batch_size=1,
-            shuffle=False,
-            collate_fn=collate_single_item,
+        val_loader = build_train_loader(
+            datasets=val_datasets,
             num_workers=num_workers,
-            pin_memory=(device.type == "cuda"),
-            **(
-                {"prefetch_factor": 1, "persistent_workers": True} if num_workers > 0 else {}  # type: ignore[arg-type]
-            ),
+            device=device,
+            sampling="proportional",
+            variable_channel_counts=variable_counts,
+            seed=training_seed,
+            shuffle=False,
         )
 
         patience = int(stage["early_stopping_patience"])
@@ -407,6 +475,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                 optimiser=optimiser,
                 grad_clip_norm=grad_clip_norm,
                 log_every_files=log_every_files,
+                epoch=epoch,
             )
 
             with torch.no_grad():
@@ -418,6 +487,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                     optimiser=None,
                     grad_clip_norm=0.0,
                     log_every_files=0,
+                    epoch=epoch,
                 )
 
             epoch_row = {

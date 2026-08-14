@@ -21,6 +21,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
+from data.variable_channels import CANONICAL_CHANNELS, embed_observed_csm
 from lam_min.dataset.gen_dataset.gen_dataset import get_visibility_matrix
 from lam_min.doa_metrics import compute_seld_metrics_for_files
 from lam_min.util.utils import (
@@ -68,6 +69,7 @@ LAM_MIN_MODELS = {
     "SAFMNLAM",
     "GANLAM",
     "AINNLAM",
+    "VariableSRCNNLAM",
 }
 
 # The expected length of the model output tuple when metrics are collected.
@@ -469,7 +471,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
 
     Loads configuration files for inference and dataset settings, sets up logging,
     and initialises the specified model (UpLAM, LAM, BicubicLAM, SRCNNLAM, IMDNLAM,
-    SAFMNLAM, GANLAM, or AINNLAM).
+    SAFMNLAM, GANLAM, AINNLAM, or VariableSRCNNLAM).
 
     Processes audio files through the data loader, computes visibility matrices,
     performs model inference, and writes predictions in DCASE CSV format unless
@@ -477,12 +479,14 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
     performance metrics including latency, FLOPs, and memory usage.
 
     Supported datasets: starss23
-    Supported models: UpLAM, LAM, BicubicLAM, SRCNNLAM, IMDNLAM, SAFMNLAM, GANLAM, AINNLAM
+    Supported models: UpLAM, LAM, BicubicLAM, SRCNNLAM, VariableSRCNNLAM, IMDNLAM,
+                      SAFMNLAM, GANLAM, AINNLAM
 
     Command-line arguments
     ----------------------
     --device (str): Device to run inference on ('cpu', 'mps', 'cuda', 'cuda:0', or '0').
                     Default: 'cpu'
+    --input-channel-indices (int ...): Canonical indices required by VariableSRCNNLAM.
 
     Output
     ------
@@ -515,6 +519,13 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
         type=str,
         help="Path to the inference configuration YAML file.",
     )
+    parser.add_argument(
+        "--input-channel-indices",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Zero-based canonical Eigenmike indices for VariableSRCNNLAM input channels.",
+    )
     args = parser.parse_args()
 
     ## Configurations
@@ -523,6 +534,11 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
     inference_config = configs["inference"]
     dataset_config = configs["dataset"]
     _resolve_inference_variant(inference_config, repo_root=repo_root)
+    is_variable_srcnn = inference_config["model_name"] == "VariableSRCNNLAM"
+    if is_variable_srcnn and args.input_channel_indices is None:
+        parser.error("VariableSRCNNLAM requires --input-channel-indices.")
+    if not is_variable_srcnn and args.input_channel_indices is not None:
+        parser.error("--input-channel-indices is only valid for VariableSRCNNLAM.")
     selection_seed = int(inference_config.get("file_selection_seed", 0) or 0)
     selection_generator = seed_everything(selection_seed)
 
@@ -697,6 +713,29 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
         )
         model.to(device)
         model.eval()
+    elif inference_config["model_name"] == "VariableSRCNNLAM":
+        from lam_min.model.VariableSRCNNLAM import VariableSRCNNLAM  # noqa: PLC0415
+
+        model = VariableSRCNNLAM(
+            num_bands=9,
+            out_channels=32,
+            feature_channels=64,
+            mapping_channels=32,
+            variable_input_channel_counts=tuple(
+                int(count)
+                for count in inference_config.get(
+                    "variable_input_channel_counts", [4, 8, 16, 24, 32]
+                )
+            ),
+        )
+        load_srcnn_lam_state(
+            model,
+            inference_config["model_checkpoint"],
+            device,
+            lam_checkpoint=inference_config.get("lam_checkpoint"),
+        )
+        model.to(device)
+        model.eval()
     elif inference_config["model_name"] == "IMDNLAM":
         from lam_min.model.IMDNLAM import IMDNLAM  # noqa: PLC0415
 
@@ -860,6 +899,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                 audio_np,
                 sample_rate=sample_rate,
                 inference_config=inference_config,
+                input_channel_indices=args.input_channel_indices,
             )
             fs = int(audio_prep["target_sample_rate"])
 
@@ -882,6 +922,11 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                 reference_csm = None
                 if collect_metrics:
                     if (
+                        inference_config["model_name"] == "VariableSRCNNLAM"
+                        and audio_prep["full_resolution_num_channels"] != CANONICAL_CHANNELS
+                    ):
+                        reference_csm = None
+                    elif (
                         audio_prep["prepared_num_channels"]
                         == audio_prep["full_resolution_num_channels"]
                     ):
@@ -930,10 +975,20 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
             )
             # Keep the model input layout stable across variants (contiguous)
             S_in_t = torch.from_numpy(S_in).to(device).permute(1, 0, 2, 3).contiguous()
+            observed_indices_t = None
+            if inference_config["model_name"] == "VariableSRCNNLAM":
+                observed_indices_t = torch.as_tensor(
+                    audio_prep["selected_channel_indices"], dtype=torch.long, device=device
+                )
+                S_in_t = embed_observed_csm(S_in_t, observed_indices_t)
 
             # Perform inference (with optional metrics collection)
             if collect_metrics:
-                result = model(S_in_t, collect_metrics=True)
+                result = (
+                    model(S_in_t, observed_indices_t, collect_metrics=True)
+                    if observed_indices_t is not None
+                    else model(S_in_t, collect_metrics=True)
+                )
                 _, I_pred, metrics = result
 
                 # For LAM only inference, upsampler metrics are not applicable.
@@ -961,6 +1016,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                     input_tensor=S_in_t,
                     device=device,
                     inference_config=inference_config,
+                    observed_channel_indices=observed_indices_t,
                 )
 
                 stage_outputs = _extract_csm_stage_outputs(model)
@@ -1006,7 +1062,11 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                 metrics["total_params"] = total_params
                 all_metrics.append(metrics)
             else:
-                result = model(S_in_t, collect_metrics=False)
+                result = (
+                    model(S_in_t, observed_indices_t, collect_metrics=False)
+                    if observed_indices_t is not None
+                    else model(S_in_t, collect_metrics=False)
+                )
                 # Old models may return just the prediction without metrics. Handle both cases.
                 if isinstance(result, tuple) and len(result) == MODEL_RESULT_WITH_AUX_LEN:
                     _, I_pred, _ = result

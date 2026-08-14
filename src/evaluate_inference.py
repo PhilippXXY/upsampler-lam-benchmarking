@@ -463,6 +463,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Device passed to infer.py (e.g. cpu, mps, cuda).",
     )
     parser.add_argument(
+        "--input-channel-indices",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Canonical Eigenmike indices forwarded to variable-SRCNN inference runs.",
+    )
+    parser.add_argument(
         "--results",
         "--result",
         dest="results",
@@ -771,12 +778,13 @@ def select_metrics_path(
     )
 
 
-def run_inference_once(  # type: ignore[no-any-unimported]
+def run_inference_once(  # type: ignore[no-any-unimported]  # noqa: PLR0913
     repo_root: Path,
     output_root: Path,
     variant: RetainedVariantSpec,
     config_payload: dict[str, Any],
     device: str,
+    input_channel_indices: list[int] | None = None,
 ) -> Path:
     """
     Run `infer.py` once for a retained variant and return produced metrics JSON path.
@@ -793,6 +801,8 @@ def run_inference_once(  # type: ignore[no-any-unimported]
         The configuration dictionary to write to a temporary YAML file and pass to `infer.py`.
     device : str
         The device string to pass to `infer.py` (e.g. "cpu", "mps", "cuda").
+    input_channel_indices : list[int] | None, optional
+        Canonical microphone indices forwarded to variable-SRCNN runs.
 
     Returns
     -------
@@ -818,6 +828,10 @@ def run_inference_once(  # type: ignore[no-any-unimported]
         "--device",
         device,
     ]
+    if variant.infer_model_name == "VariableSRCNNLAM" and input_channel_indices is not None:
+        command.extend(
+            ("--input-channel-indices", *(str(index) for index in input_channel_indices))
+        )
     result = subprocess.run(  # noqa: S603
         command,
         cwd=repo_root,
@@ -2873,6 +2887,7 @@ def run_benchmark_comparison(  # noqa: PLR0913
     plot_modes: set[str],
     override_style_guide: bool,
     broken_y_threshold: float,
+    input_channel_indices: list[int] | None = None,
     png_dpi: int = DEFAULT_PNG_DPI,
 ) -> tuple[Path, list[Path]]:
     """
@@ -2899,6 +2914,8 @@ def run_benchmark_comparison(  # noqa: PLR0913
         plotting from the consolidated CSV.
     broken_y_threshold : float
         Broken-axis threshold for non-memory plots.
+    input_channel_indices : list[int] | None, optional
+        Canonical microphone indices for variable-SRCNN variants.
 
     Returns
     -------
@@ -2912,6 +2929,10 @@ def run_benchmark_comparison(  # noqa: PLR0913
         repo_root=repo_root,
         logger=logging.getLogger(),
     )
+    if input_channel_indices is None and any(
+        variant.infer_model_name == "VariableSRCNNLAM" for variant in variants
+    ):
+        raise ValueError("Variable SRCNN benchmarks require --input-channel-indices")
     logging.info("Resolved runnable variants: %s", ", ".join(v.variant_id for v in variants))
 
     inference_config = base_config["inference"]
@@ -2936,6 +2957,7 @@ def run_benchmark_comparison(  # noqa: PLR0913
             variant=variant,
             config_payload=model_config,
             device=device,
+            input_channel_indices=input_channel_indices,
         )
         raw_metrics = aggregate_metrics(metrics_path)
 
@@ -2982,6 +3004,7 @@ def run_benchmark_comparison(  # noqa: PLR0913
                 variant=variant,
                 config_payload=normalised_config,
                 device=device,
+                input_channel_indices=input_channel_indices,
             )
             normalised_metrics = aggregate_metrics(normalised_metrics_path)
         else:
@@ -3155,6 +3178,7 @@ def main() -> None:  # noqa: PLR0915
         plot_modes=plot_modes,
         override_style_guide=args.override_style_guide,
         broken_y_threshold=args.broken_y_threshold,
+        input_channel_indices=args.input_channel_indices,
         png_dpi=args.png_dpi,
     )
     log_comparison_outputs(output_csv, plot_paths)

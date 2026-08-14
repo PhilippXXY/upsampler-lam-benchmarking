@@ -15,6 +15,7 @@ uv run python src/evaluate_inference.py --base-config config/inference_config.ya
 | --- | --- | --- |
 | `--base-config` | `config/inference_config.yaml` | Base inference config used as the template for every run |
 | `--device` | `cpu` | Device forwarded to `src/infer.py` |
+| `--input-channel-indices` | none | Canonical Eigenmike indices forwarded to variable-SRCNN runs |
 | `--results` | none | Existing `benchmark-comparison-*` directory whose `benchmark_metrics.csv` should be used to rebuild plots without rerunning inference |
 | `--targets` | config-driven | One or more family selectors and/or exact retained variant IDs to evaluate |
 | `--mode` | none | Plot presentation modes (any combination): `latex-font-only`, `no-title`, `no-frame-context`, `save-eps`, `save-svg`, `three-panel-circle-markers` |

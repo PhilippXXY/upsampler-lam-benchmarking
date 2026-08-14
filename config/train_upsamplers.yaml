@@ -53,11 +53,12 @@ training:
 
 # --- Upsampler Architecture & Loss Hyperparameters ---
 model:
-  name: "IMDNUpsampler" # Options: "BicubicUpsampler", "SRCNNUpsampler", "IMDNUpsampler", "SAFMNUpsampler", "GANUpsampler", "AINNUpsampler", or custom model
+  name: "IMDNUpsampler" # Options: "BicubicUpsampler", "SRCNNUpsampler", "IMDNUpsampler", "SAFMNUpsampler", "GANUpsampler", "AINNUpsampler", "VariableSRCNNLAM", or custom model
   in_channels: 4
   out_channels: 32
   feature_channels: 64
   mapping_channels: 32
+  variable_input_channel_counts: [4, 8, 16, 24, 32]
   n_blocks: 8
   ffn_scale: 2.0
   n_levels: 4

@@ -60,6 +60,7 @@ Full key reference for `config/train_upsamplers.yaml`.
 | `out_channels` | int | `32` | High-resolution microphone count |
 | `feature_channels` | int | `64` | Used by SRCNN, IMDN, and SAFMN. GAN fixes this internally to `128` |
 | `mapping_channels` | int | `32` | Used by SRCNN and IMDN |
+| `variable_input_channel_counts` | list[int] | `[4, 8, 16, 24, 32]` | Counts accepted by `VariableSRCNNUpsampler` |
 | `n_blocks` | int | `8` | Used by SAFMN and by the config as a GAN residual-block default |
 | `ffn_scale` | float | `2.0` | Used by SAFMN |
 | `n_levels` | int | `4` | Used by SAFMN |

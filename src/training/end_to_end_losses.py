@@ -14,7 +14,7 @@ from upsampler.bicubic import BicubicUpsampler
 from upsampler.gan import GANUpsampler
 from upsampler.imdn import IMDNUpsampler
 from upsampler.safmn import SAFMNUpsampler
-from upsampler.srcnn import SRCNNUpsampler
+from upsampler.srcnn import SRCNNUpsampler, VariableSRCNNUpsampler
 
 
 class EndToEndLossModel(Protocol):
@@ -22,11 +22,7 @@ class EndToEndLossModel(Protocol):
 
     upsampler: nn.Module
     lam: nn.Module
-
-    def forward_components(
-        self, S: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Return upsampled CSM, reconstructed CSM, and latent map."""
+    forward_components: Callable[..., tuple[torch.Tensor, torch.Tensor, torch.Tensor]]
 
     def parameters(self, recurse: bool = True) -> Iterator[nn.Parameter]:
         """Return trainable parameters."""
@@ -62,6 +58,7 @@ def compute_auxiliary_loss(
     S_pred: torch.Tensor,
     S_high: torch.Tensor,
     use_model_specific_aux_loss: bool,
+    observed_channel_indices: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """
     Compute the auxiliary reconstruction loss.
@@ -76,6 +73,8 @@ def compute_auxiliary_loss(
         Ground-truth high-resolution CSM.
     use_model_specific_aux_loss : bool
         Whether to reuse each upsampler's own reconstruction helper.
+    observed_channel_indices : torch.Tensor | None, optional
+        Canonical observed indices for variable-channel reconstruction loss.
 
     Returns
     -------
@@ -88,6 +87,10 @@ def compute_auxiliary_loss(
         return _generic_complex_mse(S_pred, target)
 
     upsampler = model.upsampler
+    if isinstance(upsampler, VariableSRCNNUpsampler):
+        if observed_channel_indices is None:
+            raise ValueError("variable SRCNN auxiliary loss requires observed indices")
+        return upsampler.compute_loss(S_pred, target, observed_channel_indices)
     if isinstance(upsampler, CDBPN):
         return _generic_complex_mse(S_pred, target)
     if isinstance(upsampler, AINNUpsampler):
@@ -142,6 +145,7 @@ def compute_lam_loss_terms(
     S_low: torch.Tensor,
     S_high: torch.Tensor,
     lam_loss: nn.Module,
+    observed_channel_indices: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, float]:
     """
     Run the wrapper forward pass and compute the original-method LAM losses.
@@ -156,6 +160,8 @@ def compute_lam_loss_terms(
         High-resolution complex CSM batch.
     lam_loss : nn.Module
         Original-method LAM loss.
+    observed_channel_indices : torch.Tensor | None, optional
+        Canonical observed indices for variable-channel wrappers.
 
     Returns
     -------
@@ -163,7 +169,15 @@ def compute_lam_loss_terms(
         Upsampled CSM, reconstructed CSM, total LAM loss, reconstruction term,
         TV term, and the scalar TV weight.
     """
-    S_pred, S_out, latent_x = model.forward_components(S_low)
+    forward_components = cast(
+        Callable[..., tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
+        model.forward_components,
+    )
+    S_pred, S_out, latent_x = (
+        forward_components(S_low, observed_channel_indices)
+        if observed_channel_indices is not None
+        else forward_components(S_low)
+    )
     original_latent = _extract_original_lam_latent(latent_x)
     lam_target = S_high.to(dtype=S_out.dtype)
     lam_loss_fn = cast(
