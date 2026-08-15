@@ -30,6 +30,7 @@ locata_loader.LocataGroundTruthLoader : LOCATA frame-level DoA parser
 starss_loader.StarssAudioDataset : Full STARSS audio-record loader with ground truth
 starss_loader.StarssGroundTruthLoader : STARSS ground truth CSV parser
 stairs26_loader.Stairs26AudioDataset : Full STAIRS26 audio-record loader
+stairs26_loader.Stairs26GroundTruthLoader : STAIRS26 peak DoA metadata loader
 audiblelight_loader.AudibleLightCSMPairDataset : AudibleLight CSM-pair training dataset
 eigenscape_loader.EigenscapeCSMPairDataset : EigenScape CSM-pair training dataset
 """

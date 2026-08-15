@@ -8,13 +8,31 @@ ground truth loaders that return DoaEvent objects.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Protocol
 
 import numpy as np
 
 from data.doa_event import DoaEvent
-from data.starss_loader import StarssGroundTruthLoader
 from lam_min import SELD_evaluation_metrics
+
+
+class GroundTruthLoader(Protocol):
+    """Dataset-independent DoA ground-truth loader."""
+
+    def load(self, file_id: str) -> DoaEvent:
+        """Load one recording's events.
+
+        Parameters
+        ----------
+        file_id : str
+            Recording identifier.
+
+        Returns
+        -------
+        DoaEvent
+            Frame-level direction events.
+        """
+        ...
 
 
 def load_output_format_file(output_format_file: str | Path) -> dict[int, list[list[float]]]:
@@ -191,7 +209,7 @@ def convert_output_format_cartesian_to_polar(
 
 def compute_seld_metrics_for_files(
     pred_files_path: Path,
-    gt_loader: StarssGroundTruthLoader,
+    gt_loader: GroundTruthLoader,
     file_ids: Iterable[str],
     num_classes: int = 13,
     doa_threshold: int = 20,
@@ -207,7 +225,7 @@ def compute_seld_metrics_for_files(
     ----------
     pred_files_path: Path
         Path to the directory containing prediction CSV files.
-    gt_loader: StarssGroundTruthLoader
+    gt_loader: GroundTruthLoader
         Loader object for ground truth events.
     file_ids: Iterable[str]
         Iterable of prediction file identifiers (without .csv extension).
@@ -272,7 +290,7 @@ def compute_seld_metrics_for_files(
         if not gt_dict:
             continue
 
-        nb_ref_frames = max(list(gt_dict.keys()))
+        nb_ref_frames = max(gt_dict) + 1
         pred_labels = segment_labels(pred_dict, nb_ref_frames)
         gt_labels = segment_labels(gt_dict, nb_ref_frames)
         eval_metrics.update_seld_scores(pred_labels, gt_labels)

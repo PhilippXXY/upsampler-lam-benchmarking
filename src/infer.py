@@ -453,6 +453,14 @@ def _build_ground_truth_loader(
             frame_width_ms=inference_config["frame_width_ms"],
         )
 
+    if dataset_name == "stairs26":
+        from data.stairs26_loader import Stairs26GroundTruthLoader  # noqa: PLC0415
+
+        return Stairs26GroundTruthLoader(
+            Path(dataset_config["data_ground_truth_path"]),
+            frame_width_ms=inference_config["frame_width_ms"],
+        )
+
     if dataset_name == "locata":
         from data.locata_loader import LocataGroundTruthLoader  # noqa: PLC0415
 
@@ -1125,7 +1133,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
 
     # Save metrics if collected
     if collect_metrics and all_metrics:
-        if not runtime_only_benchmark and inference_config["data_set"] != "stairs26":
+        if not runtime_only_benchmark:
             gt_loader = _build_ground_truth_loader(
                 inference_config["data_set"],
                 dataset_config,
@@ -1163,9 +1171,6 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                     "seld_score": seld_score,
                 }
             )
-        elif not runtime_only_benchmark and inference_config["data_set"] == "stairs26":
-            logging.info("Skipping SELD evaluation: STAIRS26 uses acoustic-image JSON labels.")
-
         # Save metrics to JSON
         metrics_path = Path(output_path).joinpath(f"metrics_{timestamp}.json")
         with open(metrics_path, "w") as f:
