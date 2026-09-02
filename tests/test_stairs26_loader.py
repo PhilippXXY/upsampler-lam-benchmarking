@@ -9,9 +9,13 @@ import soundfile
 import torch
 
 from data.stairs26_loader import Stairs26AudioDataset, Stairs26GroundTruthLoader
-from lam_min.doa_metrics import compute_seld_metrics_for_files
+from lam_min.doa_metrics import (
+    compute_seld_metrics_for_files,
+    compute_seld_metrics_report_for_files,
+)
 
 SAMPLE_RATE = 24_000
+TWO_FILES = 2
 
 
 def _write_wav(path: Path, channels: int) -> None:
@@ -131,3 +135,45 @@ def test_ground_truth_loader_supports_seld_evaluation(tmp_path: Path) -> None:
     assert localisation_error == pytest.approx(0.0)
     assert localisation_recall == pytest.approx(1.0)
     assert seld_score == pytest.approx(0.0)
+
+
+def test_seld_report_includes_prediction_ratio_and_file_standard_deviation(
+    tmp_path: Path,
+) -> None:
+    """Report prediction/reference ratio and sample spread across files."""
+    metadata = tmp_path / "labels"
+    predictions = tmp_path / "predictions"
+    metadata.mkdir()
+    predictions.mkdir()
+    annotation = {
+        "annotations": [
+            {
+                "metadata_frame_index": 10,
+                "instance_id": 0,
+                "category_id": 3,
+                "segmentation": [[[180.0, 90.0, 1.0]]],
+            }
+        ]
+    }
+    for file_id in ("matched", "missed"):
+        (metadata / f"{file_id}_std.json").write_text(json.dumps(annotation), encoding="utf-8")
+    (predictions / "matched.csv").write_text("10,0,0,0.0,0.0\n", encoding="utf-8")
+    (predictions / "missed.csv").write_text("", encoding="utf-8")
+
+    report = compute_seld_metrics_report_for_files(
+        pred_files_path=predictions,
+        gt_loader=Stairs26GroundTruthLoader(metadata),
+        file_ids=["matched", "missed"],
+        num_classes=1,
+        use_polar_format=False,
+        class_agnostic=True,
+    )
+
+    assert report["prediction_to_reference_ratio"] == pytest.approx(0.5)
+    assert report["files_evaluated"] == TWO_FILES
+    assert report["file_level_summary"]["localisation_recall"]["estimate"] == pytest.approx(
+        0.5
+    )
+    assert report["file_level_summary"]["localisation_recall"][
+        "sample_standard_deviation"
+    ] == pytest.approx(np.sqrt(0.5))

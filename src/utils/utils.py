@@ -464,11 +464,33 @@ def _print_metrics_summary(  # noqa: C901, PLR0915
             return nan_text
         return template.format(value=value)
 
+    def _format_evaluation_metric(
+        name: str,
+        values: list[float],
+        *,
+        scale: float = 1.0,
+        suffix: str = "",
+        decimals: int = 4,
+    ) -> str:
+        """Format the pooled estimate with supplementary file-level spread."""
+        summary = file_level_summary.get(name, {})
+        estimate = _mean_or_nan(values)
+        standard_deviation = summary.get("sample_standard_deviation")
+        formatted = f"{estimate * scale:.{decimals}f}"
+        if standard_deviation is not None:
+            spread = float(standard_deviation) * scale
+            formatted += f" (file SD {spread:.{decimals}f})"
+        return f"{formatted}{suffix}" if not math.isnan(estimate) else "N/A"
+
     output_lines: list[str] = []
     runtime_metrics = [m for m in metrics_list if "file_id" in m]
     if not runtime_metrics:
         runtime_metrics = [m for m in metrics_list if "num_frames" in m]
     cmd_medians = aggregate_all_cmd_global_medians(runtime_metrics)
+    evaluation_row = next((m for m in reversed(metrics_list) if "seld_score" in m), {})
+    file_level_summary = evaluation_row.get("file_level_summary", {})
+    if not isinstance(file_level_summary, dict):
+        file_level_summary = {}
 
     # Evaluation metrics
     seld_score = [m.get("seld_score", 0) for m in metrics_list if "seld_score" in m]
@@ -480,6 +502,9 @@ def _print_metrics_summary(  # noqa: C901, PLR0915
     localisation_recall = [
         m.get("localisation_recall", 0) for m in metrics_list if "localisation_recall" in m
     ]
+    prediction_to_reference_ratio = float(
+        evaluation_row.get("prediction_to_reference_ratio", float("nan"))
+    )
 
     # Calculate statistics
     total_frames = sum(m.get("num_frames", 0) for m in runtime_metrics)
@@ -603,16 +628,31 @@ def _print_metrics_summary(  # noqa: C901, PLR0915
     ]
 
     eval_data = [
-        ["SELD score", _format_optional(_mean_or_nan(seld_score), "{value:.4f}")],
-        ["F-score", _format_optional(_mean_or_nan(f_score) * 100.0, "{value:.2f} %")],
-        ["Error rate", _format_optional(_mean_or_nan(error_rate), "{value:.2f}")],
+        ["SELD score", _format_evaluation_metric("seld_score", seld_score)],
+        [
+            "F-score",
+            _format_evaluation_metric("f_score", f_score, scale=100.0, suffix=" %", decimals=2),
+        ],
+        ["Error rate", _format_evaluation_metric("error_rate", error_rate, decimals=2)],
         [
             "Localisation error",
-            _format_optional(_mean_or_nan(localisation_error), "{value:.2f} °"),
+            _format_evaluation_metric(
+                "localisation_error", localisation_error, suffix=" °", decimals=2
+            ),
         ],
         [
             "Localisation recall",
-            _format_optional(_mean_or_nan(localisation_recall) * 100.0, "{value:.2f} %"),
+            _format_evaluation_metric(
+                "localisation_recall",
+                localisation_recall,
+                scale=100.0,
+                suffix=" %",
+                decimals=2,
+            ),
+        ],
+        [
+            "Prediction/reference (P/R)",
+            _format_optional(prediction_to_reference_ratio, "{value:.4f}"),
         ],
     ]
 

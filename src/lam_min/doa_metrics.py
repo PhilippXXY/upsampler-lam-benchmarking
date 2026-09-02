@@ -8,12 +8,20 @@ ground truth loaders that return DoaEvent objects.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, Protocol
+from typing import Any, Iterable, Protocol
 
 import numpy as np
 
 from data.doa_event import DoaEvent
 from lam_min import SELD_evaluation_metrics
+
+DCASE_METRIC_NAMES = (
+    "error_rate",
+    "f_score",
+    "localisation_error",
+    "localisation_recall",
+    "seld_score",
+)
 
 
 class GroundTruthLoader(Protocol):
@@ -259,12 +267,73 @@ def compute_seld_metrics_for_files(
             - SELD score
             - Per-class metric array
     """
-    if class_agnostic and num_classes != 1:
+    report = compute_seld_metrics_report_for_files(
+        pred_files_path=pred_files_path,
+        gt_loader=gt_loader,
+        file_ids=file_ids,
+        num_classes=num_classes,
+        doa_threshold=doa_threshold,
+        average=average,
+        use_polar_format=use_polar_format,
+        class_agnostic=class_agnostic,
+        file_id_mapping=file_id_mapping,
+    )
+    metrics = report["metrics"]
+    return (
+        *(float(metrics[name]) for name in DCASE_METRIC_NAMES),
+        np.asarray(report["classwise"]),
+    )
+
+
+def compute_seld_metrics_report_for_files(
+    pred_files_path: Path,
+    gt_loader: GroundTruthLoader,
+    file_ids: Iterable[str],
+    num_classes: int = 13,
+    doa_threshold: int = 20,
+    average: str = "macro",
+    use_polar_format: bool = True,
+    class_agnostic: bool = False,
+    file_id_mapping: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """
+    Compute pooled and file-level SELD evaluation statistics.
+
+    Parameters
+    ----------
+    pred_files_path : Path
+        Directory containing DCASE prediction CSV files.
+    gt_loader : GroundTruthLoader
+        Ground-truth event loader.
+    file_ids : Iterable[str]
+        Prediction file identifiers without the ``.csv`` suffix.
+    num_classes : int, optional
+        Number of sound event classes.
+    doa_threshold : int, optional
+        Localisation threshold in degrees.
+    average : str, optional
+        SELD class-averaging method.
+    use_polar_format : bool, optional
+        Convert Cartesian predictions to polar coordinates.
+    class_agnostic : bool, optional
+        Evaluate all events as class zero.
+    file_id_mapping : dict[str, str] | None, optional
+        Prediction-to-ground-truth identifier mapping.
+
+    Returns
+    -------
+    dict[str, Any]
+        Pooled metrics, event counts, prediction/reference ratio, per-file metrics, and
+        file-level sample statistics calculated with ``ddof=1``.
+    """
+    if class_agnostic:
         num_classes = 1
 
     eval_metrics = SELD_evaluation_metrics.SELDMetrics(
         nb_classes=num_classes, doa_threshold=doa_threshold, average=average
     )
+    file_metrics: list[dict[str, float | str]] = []
+    reference_event_count = predicted_event_count = 0
 
     for file_id in file_ids:
         pred_file = pred_files_path / f"{file_id}.csv"
@@ -294,8 +363,52 @@ def compute_seld_metrics_for_files(
         pred_labels = segment_labels(pred_dict, nb_ref_frames)
         gt_labels = segment_labels(gt_dict, nb_ref_frames)
         eval_metrics.update_seld_scores(pred_labels, gt_labels)
+        file_evaluator = SELD_evaluation_metrics.SELDMetrics(
+            nb_classes=num_classes, doa_threshold=doa_threshold, average=average
+        )
+        file_evaluator.update_seld_scores(pred_labels, gt_labels)
+        values = file_evaluator.compute_seld_scores()[:5]
+        file_metrics.append(
+            {"file_id": gt_file_id, **dict(zip(DCASE_METRIC_NAMES, map(float, values), strict=True))}
+        )
+        reference_event_count += sum(map(len, gt_dict.values()))
+        predicted_event_count += sum(map(len, pred_dict.values()))
 
     ER, F, LE, LR, seld_scr, classwise = eval_metrics.compute_seld_scores()
     if not isinstance(classwise, np.ndarray):
         classwise = np.asarray(classwise)
-    return ER, F, LE, LR, seld_scr, classwise
+    matrix = np.asarray(
+        [[row[name] for name in DCASE_METRIC_NAMES] for row in file_metrics], dtype=float
+    )
+    means = np.mean(matrix, axis=0) if len(matrix) else np.full(len(DCASE_METRIC_NAMES), np.nan)
+    variances = (
+        np.var(matrix, axis=0, ddof=1)
+        if len(matrix) > 1
+        else np.full(len(DCASE_METRIC_NAMES), np.nan)
+    )
+    file_level_summary = {
+        name: {
+            "estimate": float(means[index]),
+            "sample_variance": (
+                float(variances[index]) if np.isfinite(variances[index]) else None
+            ),
+            "sample_standard_deviation": (
+                float(np.sqrt(variances[index])) if np.isfinite(variances[index]) else None
+            ),
+        }
+        for index, name in enumerate(DCASE_METRIC_NAMES)
+    }
+    return {
+        "metrics": dict(zip(DCASE_METRIC_NAMES, map(float, (ER, F, LE, LR, seld_scr)), strict=True)),
+        "classwise": classwise,
+        "reference_event_count": reference_event_count,
+        "predicted_event_count": predicted_event_count,
+        "prediction_to_reference_ratio": (
+            predicted_event_count / reference_event_count
+            if reference_event_count
+            else float("nan")
+        ),
+        "files_evaluated": len(file_metrics),
+        "file_metrics": file_metrics,
+        "file_level_summary": file_level_summary,
+    }

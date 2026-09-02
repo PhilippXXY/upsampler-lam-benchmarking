@@ -23,7 +23,7 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 
 from data.variable_channels import CANONICAL_CHANNELS, embed_observed_csm
 from lam_min.dataset.gen_dataset.gen_dataset import get_visibility_matrix
-from lam_min.doa_metrics import compute_seld_metrics_for_files
+from lam_min.doa_metrics import compute_seld_metrics_report_for_files
 from lam_min.util.utils import (
     load_ainn_lam_state,
     load_bicubic_lam_state,
@@ -1150,7 +1150,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
             pred_file_ids = [pred_id for pred_id, _ in processed_file_ids]
             file_id_mapping = {pred_id: gt_id for pred_id, gt_id in processed_file_ids}
 
-            ER, F, LE, LR, seld_score, _ = compute_seld_metrics_for_files(
+            seld_report = compute_seld_metrics_report_for_files(
                 pred_files_path=output_path,
                 gt_loader=gt_loader,
                 file_ids=pred_file_ids,
@@ -1164,11 +1164,15 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
 
             all_metrics.append(
                 {
-                    "error_rate": ER,
-                    "f_score": F,
-                    "localisation_error": LE,
-                    "localisation_recall": LR,
-                    "seld_score": seld_score,
+                    **seld_report["metrics"],
+                    "reference_event_count": seld_report["reference_event_count"],
+                    "predicted_event_count": seld_report["predicted_event_count"],
+                    "prediction_to_reference_ratio": seld_report[
+                        "prediction_to_reference_ratio"
+                    ],
+                    "files_evaluated": seld_report["files_evaluated"],
+                    "file_metrics": seld_report["file_metrics"],
+                    "file_level_summary": seld_report["file_level_summary"],
                 }
             )
         # Save metrics to JSON

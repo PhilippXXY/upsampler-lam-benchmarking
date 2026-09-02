@@ -60,6 +60,12 @@ class AggregatedBenchmarkMetrics:
         Aggregated localisation error in degrees, or ``nan`` if unavailable.
     localisation_recall : float
         Aggregated localisation recall on the native 0..1 scale, or ``nan`` if unavailable.
+    prediction_to_reference_ratio : float
+        Ratio of predicted to reference events, or ``nan`` if unavailable.
+    localisation_error_sample_standard_deviation_deg : float
+        File-level sample standard deviation of localisation error in degrees.
+    localisation_recall_sample_standard_deviation : float
+        File-level sample standard deviation of localisation recall on the native 0..1 scale.
     total_params : int
         Total number of model parameters, or ``0`` if unavailable.
     file_ids : tuple[str, ...]
@@ -83,6 +89,9 @@ class AggregatedBenchmarkMetrics:
     cmd_reference_to_lam_denoise4_median: float
     localisation_error_deg: float
     localisation_recall: float
+    prediction_to_reference_ratio: float
+    localisation_error_sample_standard_deviation_deg: float
+    localisation_recall_sample_standard_deviation: float
     total_params: int
     file_ids: tuple[str, ...]
 
@@ -120,6 +129,31 @@ def _float_from_candidates(
         except (TypeError, ValueError):
             continue
     return float(default)
+
+
+def _file_level_standard_deviation(row: dict[str, Any], metric: str) -> float:
+    """
+    Read a file-level sample standard deviation from an evaluation row.
+
+    Parameters
+    ----------
+    row : dict[str, Any]
+        Evaluation metrics row.
+    metric : str
+        Metric name within ``file_level_summary``.
+
+    Returns
+    -------
+    float
+        Sample standard deviation, or ``nan`` when unavailable.
+    """
+    summary = row.get("file_level_summary")
+    metric_summary = summary.get(metric) if isinstance(summary, dict) else None
+    if not isinstance(metric_summary, dict):
+        return float("nan")
+    return _float_from_candidates(
+        metric_summary, "sample_standard_deviation", default=float("nan")
+    )
 
 
 def apply_benchmark_audio_length(
@@ -307,6 +341,17 @@ def aggregate_metrics_json(metrics_path: Path) -> AggregatedBenchmarkMetrics:
             "localisation_recall",
             "localization_recall",
             default=float("nan"),
+        ),
+        prediction_to_reference_ratio=_float_from_candidates(
+            evaluation_row,
+            "prediction_to_reference_ratio",
+            default=float("nan"),
+        ),
+        localisation_error_sample_standard_deviation_deg=_file_level_standard_deviation(
+            evaluation_row, "localisation_error"
+        ),
+        localisation_recall_sample_standard_deviation=_file_level_standard_deviation(
+            evaluation_row, "localisation_recall"
         ),
         total_params=total_params,
         file_ids=tuple(str(row["file_id"]) for row in per_file_rows),

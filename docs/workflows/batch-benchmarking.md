@@ -66,7 +66,7 @@ Distinct variants are logical retained runtime names. They may resolve to separa
 For each retained variant:
 
 1. run one raw full-evaluation inference pass
-2. aggregate latency, GFLOPs, raw peak memory, localisation error, and localisation recall
+2. aggregate latency, GFLOPs, raw peak memory, localisation metrics, P/R, and file-level sample standard deviations
 3. if `normalised_memory_enabled` is true, run one separate runtime-only normalised memory pass
 4. aggregate the normalised end-to-end peak-memory reductions
 5. write one row into the consolidated CSV

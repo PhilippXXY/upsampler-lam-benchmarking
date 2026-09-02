@@ -144,6 +144,9 @@ The consolidated CSV is built per retained variant.
 | --------- | ------ |
 | `localisation_error_deg` | Full raw evaluation |
 | `localisation_recall` | Full raw evaluation (native 0..1 scale) |
+| `prediction_to_reference_ratio` | Predicted event count divided by reference event count |
+| `localisation_error_sample_standard_deviation_deg` | File-level sample standard deviation with `ddof=1` |
+| `localisation_recall_sample_standard_deviation` | File-level sample standard deviation with `ddof=1` on the native 0..1 scale |
 
 ### Model Complexity
 

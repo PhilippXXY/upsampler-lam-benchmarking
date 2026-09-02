@@ -128,6 +128,12 @@ class ModelResult:
         Full-evaluation localisation error in degrees.
     localisation_recall : float
         Full-evaluation localisation recall on the native 0..1 scale.
+    prediction_to_reference_ratio : float
+        Ratio of predicted to reference events in the full evaluation.
+    localisation_error_sample_standard_deviation_deg : float
+        File-level sample standard deviation of localisation error in degrees.
+    localisation_recall_sample_standard_deviation : float
+        File-level sample standard deviation of localisation recall on the native 0..1 scale.
     total_params : int
         Total number of model parameters.
     """
@@ -162,6 +168,9 @@ class ModelResult:
     normalised_memory_duration_sec: float
     localisation_error_deg: float
     localisation_recall: float
+    prediction_to_reference_ratio: float
+    localisation_error_sample_standard_deviation_deg: float
+    localisation_recall_sample_standard_deviation: float
     total_params: int
 
 
@@ -952,6 +961,9 @@ def write_comparison_csv(output_csv: Path, results: list[ModelResult]) -> None:
         "normalised_memory_duration_sec",
         "localisation_error_deg",
         "localisation_recall",
+        "prediction_to_reference_ratio",
+        "localisation_error_sample_standard_deviation_deg",
+        "localisation_recall_sample_standard_deviation",
         "total_params",
         "run_dir",
         "metrics_json_path",
@@ -1010,6 +1022,17 @@ def write_comparison_csv(output_csv: Path, results: list[ModelResult]) -> None:
                     ),
                     "localisation_error_deg": _format_optional_float(result.localisation_error_deg),
                     "localisation_recall": _format_optional_float(result.localisation_recall),
+                    "prediction_to_reference_ratio": _format_optional_float(
+                        result.prediction_to_reference_ratio
+                    ),
+                    "localisation_error_sample_standard_deviation_deg": (
+                        _format_optional_float(
+                            result.localisation_error_sample_standard_deviation_deg
+                        )
+                    ),
+                    "localisation_recall_sample_standard_deviation": _format_optional_float(
+                        result.localisation_recall_sample_standard_deviation
+                    ),
                     "total_params": result.total_params,
                     "run_dir": str(result.run_dir),
                     "metrics_json_path": str(result.metrics_json_path),
@@ -2980,6 +3003,9 @@ def run_benchmark_comparison(  # noqa: PLR0913
             cmd_reference_to_lam_denoise4_median=float("nan"),
             localisation_error_deg=float("nan"),
             localisation_recall=float("nan"),
+            prediction_to_reference_ratio=float("nan"),
+            localisation_error_sample_standard_deviation_deg=float("nan"),
+            localisation_recall_sample_standard_deviation=float("nan"),
             total_params=0,
             file_ids=(),
         )
@@ -3046,6 +3072,13 @@ def run_benchmark_comparison(  # noqa: PLR0913
             ),
             localisation_error_deg=raw_metrics.localisation_error_deg,
             localisation_recall=raw_metrics.localisation_recall,
+            prediction_to_reference_ratio=raw_metrics.prediction_to_reference_ratio,
+            localisation_error_sample_standard_deviation_deg=(
+                raw_metrics.localisation_error_sample_standard_deviation_deg
+            ),
+            localisation_recall_sample_standard_deviation=(
+                raw_metrics.localisation_recall_sample_standard_deviation
+            ),
             total_params=raw_metrics.total_params,
         )
         results.append(result)
